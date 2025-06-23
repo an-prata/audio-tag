@@ -10,13 +10,20 @@ pub trait Audio {
 }
 
 pub trait AudioTagged {
+    /// Get the tag information of the requested [`AudioTag`].
+    ///
+    /// [`AudioTag`]: AudioTag
     fn get_tag(&self, audio_tag: AudioTag) -> Option<String>;
 }
 
+/// A tag which can be attributed to an audio file. Includes information like the artist, title,
+/// album, etc.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AudioTag {
     /// Title of the track's album.
     AlbumTitle,
+
+    /// Beats per minute of the track.
     Bpm,
     Composer,
     ContentType,
@@ -39,6 +46,7 @@ pub enum AudioTag {
     OrginalArtist,
     OriginalReleaseYear,
     FileOwner,
+
     /// The lead artist on the track. This is usually just "Artist" in most software.
     LeadArtist,
     Band,
@@ -46,6 +54,7 @@ pub enum AudioTag {
     ModifiedBy,
     PartOfSet,
     Publisher,
+
     /// Track number within the album or other greater collection.
     TrackNumber,
     RecordingDate,

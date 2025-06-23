@@ -1,4 +1,4 @@
-use crate::id3;
+use crate::id3v2;
 use crate::tags::{Audio, AudioTag, AudioTagged};
 use extended::Extended;
 use std::path::Path;
@@ -11,6 +11,7 @@ pub struct File {
 }
 
 impl File {
+    /// Open and parse an AIFF (FORM AIFF) file.
     pub fn open(path: impl AsRef<Path>) -> Result<File> {
         let bytes = fs::read(path).map_err(|e| ParseError::Io(e))?;
         let top_level_chunks: Vec<Chunk> = parse_chunks(&bytes).collect();
@@ -117,14 +118,30 @@ impl AudioTagged for File {
 
 pub type Result<T> = result::Result<T, ParseError>;
 
+/// Errors that may occure when opening/parsing an AIFF file.
 pub enum ParseError {
+    /// An IO error.
     Io(io::Error),
+
+    /// Too many top level chunks. AIFF files should have a single top level FORM chunk.
     ExcessTopLevelChunks,
+
+    /// Could not find a FORM chunk when one was expected.
     ExpectedFormChunk,
+
+    /// Did not expect a FORM chunk but one was found.
     UnexpectedFormChunk,
+
+    /// Expected a common chunk but none were found.
     ExpectedCommonChunk,
+
+    /// Too many common chunks present. An AIFF may only have one common chunk.
     TooManyCommonChunks,
+
+    /// Too many sound data chunks present. An AIFF may only have one sound data chunk.
     TooManySoundChunks,
+
+    /// Too many ID3 chunks, expected only one.
     TooManyId3Chunks,
 }
 
@@ -417,7 +434,7 @@ struct AnnotationChunk {
 /// ID3v2 chunk holds metadata commonly used for things like a track's album, track number, etc.
 #[derive(Debug, Clone)]
 struct Id3v2Chunk {
-    tag: id3::Tag,
+    tag: id3v2::Tag,
 }
 
 /// Type alias for marker IDs.
@@ -721,7 +738,7 @@ impl TypelessChunk {
     fn id3v2_chunk(self) -> Option<Id3v2Chunk> {
         match self.id {
             ID_ID3V2 => {
-                let tag = id3::parse_tag(&self.data)?;
+                let (tag, _) = id3v2::parse_tag(&self.data).ok()?;
                 Some(Id3v2Chunk { tag })
             }
             _ => None,
@@ -742,14 +759,7 @@ impl LoopPlayMode {
 
 #[cfg(test)]
 mod tests {
-    use super::{Chunk, TypelessChunk};
-    use crate::{
-        aiff::parse_chunks,
-        id3,
-        tags::{self, AudioTagged},
-    };
-    use core::panic;
-    use std::{ascii, fs};
+    use super::TypelessChunk;
 
     #[test]
     fn chunk_from_bytes() {
