@@ -8,112 +8,70 @@ use std::{error::Error, fmt::Display, fs, io, path::Path, result};
 /// An AIFF file (FORM AIFF).
 #[derive(Debug, Clone)]
 pub struct File {
-    /// The AIFF's chunks, excluding the [`FormChunk`].
+    /// The FORM AIFF. This [`FormChunk`] should be validated and is guaranteed to contain the
+    /// [`Chunk`]s required by AIFF 1.3.
     ///
+    /// [`Chunk`]: Chunk
     /// [`FormChunk`]: FormChunk
-    chunks: Vec<Chunk>,
+    form_aiff: FormChunk,
 }
 
 impl File {
     /// Open and parse an AIFF (FORM AIFF) file.
     pub fn open(path: impl AsRef<Path>) -> Result<File> {
         let bytes = fs::read(path).map_err(|e| ParseError::Io(e))?;
-        let top_level_chunks: Vec<Chunk> = parse_chunks(&bytes).collect();
+        let mut top_level_chunks: Vec<Chunk> = parse_chunks(&bytes).collect();
 
         if top_level_chunks.len() > 1 {
             return Err(ParseError::ExcessTopLevelChunks);
         }
 
-        match top_level_chunks.first() {
+        match top_level_chunks.pop() {
             Some(Chunk::Form(form_chunk)) => {
-                let chunks: Vec<Chunk> = parse_chunks(&form_chunk.chunks).collect();
-
-                if chunks.iter().any(|c| match c {
-                    Chunk::Form(_) => true,
-                    _ => false,
-                }) {
-                    return Err(ParseError::UnexpectedFormChunk);
-                }
-
-                if chunks
-                    .iter()
-                    .filter(|c| match c {
-                        Chunk::SoundData(_) => true,
-                        _ => false,
-                    })
-                    .count()
-                    > 1
-                {
-                    return Err(ParseError::TooManySoundChunks);
-                }
-
-                if chunks
-                    .iter()
-                    .filter(|c| match c {
-                        Chunk::Id3v2(_) => true,
-                        _ => false,
-                    })
-                    .count()
-                    > 1
-                {
-                    return Err(ParseError::TooManyId3Chunks);
-                }
-
-                match chunks
-                    .iter()
-                    .filter(|c| match c {
-                        Chunk::Common(_) => true,
-                        _ => false,
-                    })
-                    .count()
-                {
-                    0 => Err(ParseError::ExpectedCommonChunk),
-                    1 => Ok(File { chunks }),
-                    2.. => Err(ParseError::TooManyCommonChunks),
-                }
+                validate_form_aiff(&form_chunk)?;
+                Ok(File {
+                    form_aiff: form_chunk,
+                })
             }
 
             _ => Err(ParseError::ExpectedFormChunk),
         }
     }
+
+    /// Get this FORM AIFF file's [`CommonChunk`].
+    ///
+    /// [`CommonChunk`]: CommonChunk
+    fn common_chunk(&self) -> CommonChunk {
+        // When constructing the `aiff::File` we validate that this `CommonChunk` exists, so
+        // this function should never panic.
+        self.form_aiff
+            .chunks
+            .iter()
+            .find_map(|chunk| match chunk {
+                Chunk::Common(common_chunk) => Some(*common_chunk),
+                _ => None,
+            })
+            .unwrap()
+    }
 }
 
 impl Audio for File {
     fn sample_rate(&self) -> f64 {
-        // When an `aiff::File` is made we check for the common chunk, so this should never panic.
-        self.chunks
-            .iter()
-            .find_map(|c| match c {
-                Chunk::Common(CommonChunk { sample_rate, .. }) => Some(sample_rate.to_f64()),
-                _ => None,
-            })
-            .expect("Common chunk should always exist.")
+        self.common_chunk().sample_rate.to_f64()
     }
 
     fn sample_size(&self) -> u16 {
-        self.chunks
-            .iter()
-            .find_map(|c| match c {
-                Chunk::Common(CommonChunk { sample_size, .. }) => Some(*sample_size as _),
-                _ => None,
-            })
-            .expect("Common chunk should always exist.")
+        self.common_chunk().sample_size as _
     }
 
     fn channels(&self) -> u16 {
-        self.chunks
-            .iter()
-            .find_map(|c| match c {
-                Chunk::Common(CommonChunk { channels, .. }) => Some(*channels as _),
-                _ => None,
-            })
-            .expect("Common chunk should always exist.")
+        self.common_chunk().channels as _
     }
 }
 
 impl AudioTagged for File {
     fn get_tag(&self, audio_tag: AudioTag) -> Option<String> {
-        self.chunks.iter().find_map(|c| match c {
+        self.form_aiff.chunks.iter().find_map(|c| match c {
             Chunk::Id3v2(Id3v2Chunk { tag }) => tag.get_tag(audio_tag),
             _ => None,
         })
@@ -147,6 +105,9 @@ pub enum ParseError {
     /// Too many common chunks present. An AIFF may only have one common chunk.
     TooManyCommonChunks,
 
+    /// There was no sound data chunk but the number of samples was not zero.
+    ExpectedSoundChunk,
+
     /// Too many sound data chunks present. An AIFF may only have one sound data chunk.
     TooManySoundChunks,
 
@@ -176,6 +137,10 @@ impl Display for ParseError {
             ParseError::TooManyCommonChunks => write!(
                 f,
                 "Too many common chunks present. An AIFF may only have one common chunk."
+            ),
+            ParseError::ExpectedSoundChunk => write!(
+                f,
+                "Number of samples was not zero but no sound data chunk was present."
             ),
             ParseError::TooManySoundChunks => write!(
                 f,
@@ -272,11 +237,11 @@ struct FormChunk {
     /// The FORM chunk's type. For an AIFF file this should be `b"AIFF"`.
     form_type: [u8; 4],
 
-    /// The remaining `data` from the original [`Chunk`]. For a FORM chunk this should contains
-    /// other chunks of the file.
+    /// The remaining `data` from the original [`Chunk`]. For a FORM chunk this is the remaining
+    /// [`Chunk`]s of the file.
     ///
     /// [`Chunk`]: Chunk
-    chunks: Vec<u8>,
+    chunks: Vec<Chunk>,
 }
 
 /// The COMM or common chunk which describes properties of the audio. One and only one common chunk
@@ -564,25 +529,25 @@ impl TypelessChunk {
     ///
     /// [`Chunk`]: Chunk
     fn from_bytes(bytes: &[u8]) -> Option<(TypelessChunk, &[u8])> {
-        if bytes.len() < size_of::<[u8; 4]>() + size_of::<i32>() {
+        if bytes.len() < 8 {
             return None;
         }
 
-        let id: [u8; 4] = *bytes[0..size_of::<[u8; 4]>()].as_array()?;
-        let size = i32::from_be_bytes(
-            *bytes[size_of::<[u8; 4]>()..size_of::<[u8; 4]>() + size_of::<i32>()].as_array()?,
-        );
-        let head_size = size_of_val(&id) + size_of_val(&size);
+        let id: [u8; 4] = *bytes[0..4].as_array()?;
+        let size = i32::from_be_bytes(*bytes[4..8].as_array()?);
 
         Some((
             TypelessChunk {
                 id,
-                data: bytes[head_size..head_size + size as usize].to_vec(),
+                data: bytes[8..8 + size as usize].to_vec(),
             },
-            &bytes[head_size + size as usize..],
+            &bytes[8 + size as usize..],
         ))
     }
 
+    /// Type this [`TypelessChunk`] by parsing its `id` field.
+    ///
+    /// [`TypelessChunk`]: TypelessChunk
     fn typed(self) -> Option<Chunk> {
         match self.id {
             ID_FORM => Some(Chunk::Form(self.form_chunk()?)),
@@ -605,108 +570,112 @@ impl TypelessChunk {
         }
     }
 
+    /// Attempt to make a [`FormChunk`] out of this [`TypelessChunk`].
+    ///
+    /// [`FormChunk`]: FormChunk
+    /// [`TypelessChunk`]: TypelessChunk
     fn form_chunk(self) -> Option<FormChunk> {
         match self.id {
             ID_FORM => Some(FormChunk {
-                form_type: *self.data[0..size_of::<[u8; 4]>()].as_array()?,
-                chunks: self.data[size_of::<[u8; 4]>()..].to_vec(),
+                form_type: *self.data[0..4].as_array()?,
+                chunks: parse_chunks(&self.data[4..]).collect(),
             }),
 
             _ => None,
         }
     }
 
+    /// Attempt to make a [`CommonChunk`] out of this [`TypelessChunk`].
+    ///
+    /// [`CommonChunk`]: CommonChunk
+    /// [`TypelessChunk`]: TypelessChunk
     fn common_chunk(self) -> Option<CommonChunk> {
+        if self.data.len() != 18 {
+            return None;
+        }
+
         match self.id {
             ID_COMMON => Some(CommonChunk {
-                // this looks confusing, but its just taking the size of all previous fields summed
-                // to that plus the size of the next field as a new slice, and using it to form a
-                // field of the struct.
-                channels: i16::from_be_bytes(*self.data[0..size_of::<i16>()].as_array()?),
-
-                num_sample_frames: u32::from_be_bytes(
-                    *self.data[size_of::<i16>()..size_of::<i16>() + size_of::<u32>()].as_array()?,
-                ),
-
-                sample_size: i16::from_be_bytes(
-                    *self.data[size_of::<i16>() + size_of::<u32>()
-                        ..size_of::<i16>() + size_of::<u32>() + size_of::<i16>()]
-                        .as_array()?,
-                ),
-
-                sample_rate: Extended::from_be_bytes(
-                    *self.data
-                        [size_of::<i16>() + size_of::<u32>() + size_of::<i16>()..self.data.len()]
-                        .as_array()?,
-                ),
+                channels: i16::from_be_bytes(*self.data[0..2].as_array()?),
+                num_sample_frames: u32::from_be_bytes(*self.data[2..6].as_array()?),
+                sample_size: i16::from_be_bytes(*self.data[6..8].as_array()?),
+                sample_rate: Extended::from_be_bytes(*self.data[8..self.data.len()].as_array()?),
             }),
 
             _ => None,
         }
     }
 
+    /// Attempt to make a [`SoundDataChunk`] out of this [`TypelessChunk`].
+    ///
+    /// [`SoundDataChunk`]: SoundDataChunk
+    /// [`TypelessChunk`]: TypelessChunk
     fn sound_data_chunk(self) -> Option<SoundDataChunk> {
+        if self.data.len() < 8 {
+            return None;
+        }
+
         match self.id {
             ID_SOUND_DATA => Some(SoundDataChunk {
-                offset: u32::from_be_bytes(*self.data[0..size_of::<u32>()].as_array()?),
-                block_size: u32::from_be_bytes(
-                    *self.data[size_of::<u32>()..size_of::<u32>() + size_of::<u32>()].as_array()?,
-                ),
-                sound_data: self.data[size_of::<u32>() + size_of::<u32>()..self.data.len()]
-                    .to_vec(),
+                offset: u32::from_be_bytes(*self.data[0..4].as_array()?),
+                block_size: u32::from_be_bytes(*self.data[4..8].as_array()?),
+                sound_data: self.data[8..self.data.len()].to_vec(),
             }),
 
             _ => None,
         }
     }
 
+    /// Attempt to make a [`MarkerChunk`] out of this [`TypelessChunk`].
+    ///
+    /// [`MarkerChunk`]: MarkerChunk
+    /// [`TypelessChunk`]: TypelessChunk
     fn marker_chunk(self) -> Option<MarkerChunk> {
+        if self.data.len() < 2 {
+            return None;
+        }
+
         match self.id {
             ID_MARKER => Some(MarkerChunk {
-                num_markers: u16::from_be_bytes(*self.data[0..size_of::<u16>()].as_array()?),
-                markers: self.data[size_of::<u16>()..].to_vec(),
+                num_markers: u16::from_be_bytes(*self.data[0..2].as_array()?),
+                markers: self.data[2..].to_vec(),
             }),
 
             _ => None,
         }
     }
 
+    /// Attempt to make a [`InstrumentChunk`] out of this [`TypelessChunk`].
+    ///
+    /// [`InstrumentChunk`]: InstrumentChunk
+    /// [`TypelessChunk`]: TypelessChunk
     fn instrument_chunk(self) -> Option<InstrumentChunk> {
+        if self.data.len() < 20 {
+            return None;
+        }
+
         match self.id {
             ID_INSTRUMENT => Some(InstrumentChunk {
                 base_note: *self.data.get(0)?,
                 detune: *self.data.get(1)?,
-                low_note: *self.data.get(3)?,
-                high_note: *self.data.get(4)?,
-                low_velocity: *self.data.get(5)?,
-                high_velocity: *self.data.get(6)?,
-                gain: i16::from_be_bytes(*self.data[7..7 + size_of::<i16>()].as_array()?),
+                low_note: *self.data.get(2)?,
+                high_note: *self.data.get(3)?,
+                low_velocity: *self.data.get(4)?,
+                high_velocity: *self.data.get(5)?,
+                gain: i16::from_be_bytes(*self.data[6..8].as_array()?),
                 sustain_loop: Loop {
                     play_mode: LoopPlayMode::from_i16(i16::from_be_bytes(
-                        *self.data[7 + size_of::<i16>()..7 + 2 * size_of::<i16>()].as_array()?,
+                        *self.data[8..10].as_array()?,
                     ))?,
-                    begin_loop: i16::from_be_bytes(
-                        *self.data[7 + 2 * size_of::<i16>()..7 + 3 * size_of::<i16>()]
-                            .as_array()?,
-                    ),
-                    end_loop: i16::from_be_bytes(
-                        *self.data[7 + 3 * size_of::<i16>()..7 + 4 * size_of::<i16>()]
-                            .as_array()?,
-                    ),
+                    begin_loop: i16::from_be_bytes(*self.data[10..12].as_array()?),
+                    end_loop: i16::from_be_bytes(*self.data[12..14].as_array()?),
                 },
                 release_loop: Loop {
                     play_mode: LoopPlayMode::from_i16(i16::from_be_bytes(
-                        *self.data[7 + 4 * size_of::<i16>()..7 + 5 * size_of::<i16>()]
-                            .as_array()?,
+                        *self.data[14..16].as_array()?,
                     ))?,
-                    begin_loop: i16::from_be_bytes(
-                        *self.data[7 + 5 * size_of::<i16>()..7 + 6 * size_of::<i16>()]
-                            .as_array()?,
-                    ),
-                    end_loop: i16::from_be_bytes(
-                        *self.data[7 + 6 * size_of::<i16>()..7 + 7 * size_of::<i16>()]
-                            .as_array()?,
-                    ),
+                    begin_loop: i16::from_be_bytes(*self.data[16..18].as_array()?),
+                    end_loop: i16::from_be_bytes(*self.data[18..20].as_array()?),
                 },
             }),
 
@@ -714,6 +683,10 @@ impl TypelessChunk {
         }
     }
 
+    /// Attempt to make a [`MidiDataChunk`] out of this [`TypelessChunk`].
+    ///
+    /// [`MidiDataChunk`]: MidiDataChunk
+    /// [`TypelessChunk`]: TypelessChunk
     fn midi_data_chunk(self) -> Option<MidiDataChunk> {
         match self.id {
             ID_MIDI_DATA => Some(MidiDataChunk {
@@ -724,6 +697,10 @@ impl TypelessChunk {
         }
     }
 
+    /// Attempt to make a [`AudioRecordingChunk`] out of this [`TypelessChunk`].
+    ///
+    /// [`AudioRecordingChunk`]: AudioRecordingChunk
+    /// [`TypelessChunk`]: TypelessChunk
     fn audio_recording_chunk(self) -> Option<AudioRecordingChunk> {
         match self.id {
             ID_AUDIO_RECORDING => Some(AudioRecordingChunk {
@@ -734,28 +711,48 @@ impl TypelessChunk {
         }
     }
 
+    /// Attempt to make a [`ApplicationSpecificChunk`] out of this [`TypelessChunk`].
+    ///
+    /// [`ApplicationSpecificChunk`]: ApplicationSpecificChunk
+    /// [`TypelessChunk`]: TypelessChunk
     fn application_specific_chunk(self) -> Option<ApplicationSpecificChunk> {
+        if self.data.len() < 4 {
+            return None;
+        }
+
         match self.id {
             ID_APPLICATION_SPECIFIC => Some(ApplicationSpecificChunk {
-                application_signature: *self.data[0..size_of::<[u8; 4]>()].as_array()?,
-                data: self.data[size_of::<[u8; 4]>()..].to_vec(),
+                application_signature: *self.data[0..4].as_array()?,
+                data: self.data[4..].to_vec(),
             }),
 
             _ => None,
         }
     }
 
+    /// Attempt to make a [`CommentsChunk`] out of this [`TypelessChunk`].
+    ///
+    /// [`CommentsChunk`]: CommentsChunk
+    /// [`TypelessChunk`]: TypelessChunk
     fn comments_chunk(self) -> Option<CommentsChunk> {
+        if self.data.len() < 2 {
+            return None;
+        }
+
         match self.id {
             ID_COMMENTS => Some(CommentsChunk {
-                num_comments: u16::from_be_bytes(*self.data[0..size_of::<u16>()].as_array()?),
-                comments: self.data[size_of::<i16>()..].to_vec(),
+                num_comments: u16::from_be_bytes(*self.data[0..2].as_array()?),
+                comments: self.data[2..].to_vec(),
             }),
 
             _ => None,
         }
     }
 
+    /// Attempt to make a [`NameChunk`] out of this [`TypelessChunk`].
+    ///
+    /// [`NameChunk`]: NameChunk
+    /// [`TypelessChunk`]: TypelessChunk
     fn name_chunk(self) -> Option<NameChunk> {
         match self.id {
             ID_NAME => Some(NameChunk { text: self.data }),
@@ -763,6 +760,10 @@ impl TypelessChunk {
         }
     }
 
+    /// Attempt to make a [`AuthorChunk`] out of this [`TypelessChunk`].
+    ///
+    /// [`AuthorChunk`]: AuthorChunk
+    /// [`TypelessChunk`]: TypelessChunk
     fn author_chunk(self) -> Option<AuthorChunk> {
         match self.id {
             ID_AUTHOR => Some(AuthorChunk { text: self.data }),
@@ -770,6 +771,10 @@ impl TypelessChunk {
         }
     }
 
+    /// Attempt to make a [`CopyrightChunk`] out of this [`TypelessChunk`].
+    ///
+    /// [`CopyrightChunk`]: CopyrightChunk
+    /// [`TypelessChunk`]: TypelessChunk
     fn copyright_chunk(self) -> Option<CopyrightChunk> {
         match self.id {
             ID_COPYRIGHT => Some(CopyrightChunk { text: self.data }),
@@ -777,6 +782,10 @@ impl TypelessChunk {
         }
     }
 
+    /// Attempt to make a [`AnnotationChunk`] out of this [`TypelessChunk`].
+    ///
+    /// [`AnnotationChunk`]: AnnotationChunk
+    /// [`TypelessChunk`]: TypelessChunk
     fn annotation_chunk(self) -> Option<AnnotationChunk> {
         match self.id {
             ID_ANNOTATION => Some(AnnotationChunk { text: self.data }),
@@ -784,6 +793,10 @@ impl TypelessChunk {
         }
     }
 
+    /// Attempt to make a [`Id3v2Chunk`] out of this [`TypelessChunk`].
+    ///
+    /// [`Id3v2Chunk`]: Id3v2Chunk
+    /// [`TypelessChunk`]: TypelessChunk
     fn id3v2_chunk(self) -> Option<Id3v2Chunk> {
         match self.id {
             ID_ID3V2 => {
@@ -808,6 +821,80 @@ impl LoopPlayMode {
             _ => None,
         }
     }
+}
+
+/// Check that a given FORM AIFF is valid. Checks the given [`FormChunk`] for basic properties
+/// involving the content and presence of its contained [`Chunk`].
+///
+/// [`FormChunk`]: FormChunk
+/// [`Chunk`]: Chunk
+fn validate_form_aiff(form: &FormChunk) -> Result<()> {
+    // The only FORM chunk should be the one given.
+    if form.chunks.iter().any(|c| match c {
+        Chunk::Form(_) => true,
+        _ => false,
+    }) {
+        return Err(ParseError::UnexpectedFormChunk);
+    }
+
+    // Must have exactly one common chunk.
+    match form
+        .chunks
+        .iter()
+        .filter(|c| match c {
+            Chunk::Common(_) => true,
+            _ => false,
+        })
+        .count()
+    {
+        0 => return Err(ParseError::ExpectedCommonChunk),
+        1 => (),
+        2.. => return Err(ParseError::TooManyCommonChunks),
+    };
+
+    // FORM AIFFs must contain at exactly one sound data chunk.
+    match form
+        .chunks
+        .iter()
+        .filter(|c| match c {
+            Chunk::SoundData(_) => true,
+            _ => false,
+        })
+        .count()
+    {
+        0 => {
+            let num_samples = form.chunks.iter().find_map(|c| match c {
+                Chunk::Common(CommonChunk {
+                    num_sample_frames, ..
+                }) => Some(*num_sample_frames),
+                _ => None,
+            });
+
+            // If there are no samples then we don't need the sound data chunk.
+            if Some(0) != num_samples {
+                return Err(ParseError::ExpectedSoundChunk);
+            }
+        }
+        1 => (),
+        2.. => return Err(ParseError::TooManySoundChunks),
+    };
+
+    // While not part of the AIFF 1.3 documentation, we have no way of deciding between two ID3v2
+    // tags, so we restrict it to just one.
+    if form
+        .chunks
+        .iter()
+        .filter(|c| match c {
+            Chunk::Id3v2(_) => true,
+            _ => false,
+        })
+        .count()
+        > 1
+    {
+        return Err(ParseError::TooManyId3Chunks);
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
