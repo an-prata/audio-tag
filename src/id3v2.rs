@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::tags::{AudioTag, AudioTagged};
+use crate::audio_info::{AudioTag, AudioTagged};
 
 #[derive(Debug, Clone)]
 pub struct Tag {

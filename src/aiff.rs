@@ -1,12 +1,16 @@
-use crate::id3v2;
-use crate::tags::{Audio, AudioTag, AudioTagged};
+use crate::{
+    audio_info::{Audio, AudioTag, AudioTagged},
+    id3v2,
+};
 use extended::Extended;
-use std::path::Path;
-use std::{fs, io, result};
+use std::{error::Error, fmt::Display, fs, io, path::Path, result};
 
 /// An AIFF file (FORM AIFF).
 #[derive(Debug, Clone)]
 pub struct File {
+    /// The AIFF's chunks, excluding the [`FormChunk`].
+    ///
+    /// [`FormChunk`]: FormChunk
     chunks: Vec<Chunk>,
 }
 
@@ -116,9 +120,14 @@ impl AudioTagged for File {
     }
 }
 
+/// Type alias for [`Result`] prefilled with a [`ParseError`] for the error type.
+///
+/// [`Result`]: result::Result
+/// [`ParseError`]: ParseError
 pub type Result<T> = result::Result<T, ParseError>;
 
 /// Errors that may occure when opening/parsing an AIFF file.
+#[derive(Debug)]
 pub enum ParseError {
     /// An IO error.
     Io(io::Error),
@@ -145,6 +154,39 @@ pub enum ParseError {
     TooManyId3Chunks,
 }
 
+impl Error for ParseError {}
+
+impl Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ParseError::Io(error) => write!(f, "Could not parse AIFF: IO error: {}", error),
+            ParseError::ExcessTopLevelChunks => write!(
+                f,
+                "Too many top level chunks. AIFF files should have a single top level FORM chunk."
+            ),
+            ParseError::ExpectedFormChunk => {
+                write!(f, "Could not find a FORM chunk when one was expected.")
+            }
+            ParseError::UnexpectedFormChunk => {
+                write!(f, "Did not expect a FORM chunk but one was found.")
+            }
+            ParseError::ExpectedCommonChunk => {
+                write!(f, "Expected a common chunk but none were found.")
+            }
+            ParseError::TooManyCommonChunks => write!(
+                f,
+                "Too many common chunks present. An AIFF may only have one common chunk."
+            ),
+            ParseError::TooManySoundChunks => write!(
+                f,
+                "Too many sound data chunks present. An AIFF may only have one sound data chunk."
+            ),
+            ParseError::TooManyId3Chunks => write!(f, "Too many ID3 chunks, expected only one."),
+        }
+    }
+}
+
+/// Type alias for chunk IDs, which are four bytes meant to be understood as characters.
 type ChunkID = [u8; 4];
 
 const ID_FORM: ChunkID = *b"FORM";
@@ -434,6 +476,9 @@ struct AnnotationChunk {
 /// ID3v2 chunk holds metadata commonly used for things like a track's album, track number, etc.
 #[derive(Debug, Clone)]
 struct Id3v2Chunk {
+    /// A fully parsed ID3v2 [`Tag`].
+    ///
+    /// [`Tag`]: id3v2::Tag
     tag: id3v2::Tag,
 }
 
@@ -443,6 +488,10 @@ type MarkerId = i16;
 /// Type alias for the `OSType` defined in _Inside Macintosh, vol II_, which is used by AIFF.
 type OsType = [u8; 4];
 
+/// A marker, associated with a position in the sound data, which contains some comment/text. Used
+/// by the [`MarkerChunk`].
+///
+/// [`MarkerChunk`]: MarkerChunk
 #[derive(Debug, Clone, Copy)]
 struct Marker<'s> {
     /// Uniqie identifier for the marker, may be any positive non-zero integer.
@@ -464,6 +513,7 @@ struct PascalShortString<'s> {
     pstring: &'s [u8],
 }
 
+/// An instrument loop.
 #[derive(Debug, Clone, Copy)]
 struct Loop {
     /// The type of looping to be performed. If [`LoopPlayMode::NoLooping`] is selected then the
@@ -479,12 +529,11 @@ struct Loop {
     end_loop: MarkerId,
 }
 
-#[repr(i16)]
 #[derive(Debug, Clone, Copy)]
 enum LoopPlayMode {
-    NoLooping = 0,
-    ForwardLooping = 1,
-    ForwardBackwardLooping = 2,
+    NoLooping,
+    ForwardLooping,
+    ForwardBackwardLooping,
 }
 
 /// Actual comment as stored in a [`CommentsChunk`].
@@ -747,6 +796,10 @@ impl TypelessChunk {
 }
 
 impl LoopPlayMode {
+    /// Creates a [`LoopPlayMode`] from an [`i16`] value, as it should be understood within an AIFF.
+    ///
+    /// [`LoopPlayMode`]: LoopPlayMode
+    /// [`i16`]: i16
     fn from_i16(i: i16) -> Option<LoopPlayMode> {
         match i {
             0 => Some(LoopPlayMode::NoLooping),

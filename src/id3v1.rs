@@ -1,4 +1,4 @@
-use crate::tags::{AudioTag, AudioTagged};
+use crate::audio_info::{AudioTag, AudioTagged};
 use std::mem;
 
 /// Packed struct for directly transmuting from bytes.

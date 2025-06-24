@@ -1,8 +1,8 @@
 use crate::{
+    audio_info::{AudioTag, AudioTagged},
     id3v1, id3v2,
-    tags::{AudioTag, AudioTagged},
 };
-use std::{fmt::Display, fs, io, ops::Range, path::Path, result};
+use std::{error::Error, fmt::Display, fs, io, ops::Range, path::Path, result};
 
 /// An MP3 file.
 pub struct File {
@@ -16,74 +16,6 @@ pub struct File {
     pub tag: Tag,
 }
 
-impl File {
-    /// Open and parse an MP3 file for reading track info.
-    pub fn open(path: impl AsRef<Path>) -> Result<File> {
-        let bytes = fs::read(path).map_err(|e| ParseError::Io(e))?;
-        let try_id3v2 = id3v2::parse_tag(&bytes);
-
-        if let Ok((v2_tag, remaining_bytes)) = try_id3v2 {
-            let frames = FramesIter { remaining_bytes }.collect();
-            let tag = Tag::Id3v2(v2_tag);
-            Ok(File { frames, tag })
-        } else if let Err(id3v2::ParseError::BadId) = try_id3v2 {
-            let mut frames: Vec<Frame> = Vec::new();
-            let mut frames_iter = FramesIter {
-                remaining_bytes: &bytes,
-            };
-
-            while let Some(frame) = frames_iter.next() {
-                frames.push(frame);
-            }
-
-            let (v1_tag, _) =
-                id3v1::parse_tag(frames_iter.remaining_bytes).ok_or(ParseError::ExpectedId3v1)?;
-            let tag = Tag::Id3v1(v1_tag);
-
-            Ok(File { frames, tag })
-        } else {
-            return Err(ParseError::Id3v2ParseError(try_id3v2.unwrap_err()));
-        }
-    }
-}
-
-impl AudioTagged for File {
-    fn get_tag(&self, audio_tag: AudioTag) -> Option<String> {
-        self.tag.get_tag(audio_tag)
-    }
-}
-
-/// Alias for a [`Result`] with the error pre-filled as a [`ParseError`].
-///
-/// [`Result`]: result::Result
-/// [`ParseError`]: ParseError
-pub type Result<T> = result::Result<T, ParseError>;
-
-/// Errors which may occur when parsing an MP3.
-#[derive(Debug)]
-pub enum ParseError {
-    /// IO errors.
-    Io(io::Error),
-
-    /// Expected an ID3v1 tag.
-    ExpectedId3v1,
-
-    /// An error parsing an ID3v2 tag.
-    Id3v2ParseError(id3v2::ParseError),
-}
-
-impl Display for ParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ParseError::Io(error) => write!(f, "MP3 parse error: IO: {}", error),
-            ParseError::ExpectedId3v1 => write!(f, "MP3 parse error: Expected ID3v1 tag"),
-            ParseError::Id3v2ParseError(parse_error) => {
-                write!(f, "MP3 parse error: ID3v2 parse error: {}", parse_error)
-            }
-        }
-    }
-}
-
 /// An ID3 tag, either [`id3v1::Tag`] or [`id3v2::Tag`]>
 ///
 /// [`id3v1::Tag`]: id3v1::Tag
@@ -94,15 +26,6 @@ pub enum Tag {
 
     /// ID3 version 1 tag.
     Id3v1(id3v1::Tag),
-}
-
-impl AudioTagged for Tag {
-    fn get_tag(&self, audio_tag: AudioTag) -> Option<String> {
-        match self {
-            Tag::Id3v2(tag) => tag.get_tag(audio_tag),
-            Tag::Id3v1(tag) => tag.get_tag(audio_tag),
-        }
-    }
 }
 
 /// A single MP3 frame.
@@ -136,6 +59,79 @@ struct FramesIter<'b> {
     remaining_bytes: &'b [u8],
 }
 
+/// Alias for a [`Result`] with the error pre-filled as a [`ParseError`].
+///
+/// [`Result`]: result::Result
+/// [`ParseError`]: ParseError
+pub type Result<T> = result::Result<T, ParseError>;
+
+/// Errors which may occur when parsing an MP3.
+#[derive(Debug)]
+pub enum ParseError {
+    /// IO errors.
+    Io(io::Error),
+
+    /// Expected an ID3v1 tag.
+    ExpectedId3v1,
+
+    /// An error parsing an ID3v2 tag.
+    Id3v2ParseError(id3v2::ParseError),
+}
+
+impl AudioTagged for Tag {
+    fn get_tag(&self, audio_tag: AudioTag) -> Option<String> {
+        match self {
+            Tag::Id3v2(tag) => tag.get_tag(audio_tag),
+            Tag::Id3v1(tag) => tag.get_tag(audio_tag),
+        }
+    }
+}
+
+impl File {
+    /// Open and parse an MP3 file for reading track info.
+    pub fn open(path: impl AsRef<Path>) -> Result<File> {
+        let bytes = fs::read(path).map_err(|e| ParseError::Io(e))?;
+
+        match id3v2::parse_tag(&bytes) {
+            // Treat the file as having an ID3v2 tag.
+            Ok((v2_tag, remaining_bytes)) => {
+                let frames = FramesIter { remaining_bytes }.collect();
+                let tag = Tag::Id3v2(v2_tag);
+                Ok(File { frames, tag })
+            }
+
+            // The starting ID for an ID3v2 tag was not present, meaning that one does not exist, so
+            // try to treat the file as having an ID3v1 tag.
+            Err(id3v2::ParseError::BadId) => {
+                let mut frames: Vec<Frame> = Vec::new();
+                let mut frames_iter = FramesIter {
+                    remaining_bytes: &bytes,
+                };
+
+                while let Some(frame) = frames_iter.next() {
+                    frames.push(frame);
+                }
+
+                let (v1_tag, _) = id3v1::parse_tag(frames_iter.remaining_bytes)
+                    .ok_or(ParseError::ExpectedId3v1)?;
+                let tag = Tag::Id3v1(v1_tag);
+
+                Ok(File { frames, tag })
+            }
+
+            Err(e) => {
+                return Err(ParseError::Id3v2ParseError(e));
+            }
+        }
+    }
+}
+
+impl AudioTagged for File {
+    fn get_tag(&self, audio_tag: AudioTag) -> Option<String> {
+        self.tag.get_tag(audio_tag)
+    }
+}
+
 impl<'d> Iterator for FramesIter<'d> {
     type Item = Frame;
 
@@ -143,6 +139,20 @@ impl<'d> Iterator for FramesIter<'d> {
         let (frame, remaining_bytes) = Frame::from_bytes(self.remaining_bytes)?;
         self.remaining_bytes = remaining_bytes;
         Some(frame)
+    }
+}
+
+impl Error for ParseError {}
+
+impl Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ParseError::Io(error) => write!(f, "MP3 parse error: IO: {}", error),
+            ParseError::ExpectedId3v1 => write!(f, "MP3 parse error: Expected ID3v1 tag"),
+            ParseError::Id3v2ParseError(parse_error) => {
+                write!(f, "MP3 parse error: ID3v2 parse error: {}", parse_error)
+            }
+        }
     }
 }
 
@@ -576,39 +586,5 @@ impl FrameHeader {
         } else {
             Some(0)
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{
-        mp3,
-        tags::{AudioTag, AudioTagged},
-    };
-
-    #[test]
-    fn parse() {
-        let mp3_file = mp3::File::open("/Users/evanoverman/Desktop/Brasil.mp3").unwrap();
-
-        match &mp3_file.tag {
-            mp3::Tag::Id3v2(tag) => {
-                for f in tag.frames.iter() {
-                    println!("Found id3v2 tag: {}", f)
-                }
-            }
-            mp3::Tag::Id3v1(tag) => println!("Found id3v1 tag"),
-        };
-
-        println!("title: {}", mp3_file.get_tag(AudioTag::Title).unwrap());
-        println!(
-            "artist: {}",
-            mp3_file.get_tag(AudioTag::LeadArtist).unwrap()
-        );
-        println!(
-            "album title: {}",
-            mp3_file.get_tag(AudioTag::AlbumTitle).unwrap()
-        );
-
-        panic!(":)");
     }
 }
