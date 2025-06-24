@@ -8,6 +8,22 @@ pub struct Tag {
     pub frames: Vec<Frame>,
 }
 
+impl Tag {
+    pub fn to_bytes(self) -> Vec<u8> {
+        let mut bytes: Vec<u8> = Vec::new();
+        bytes.append(&mut self.header.to_bytes());
+        bytes.append(
+            &mut self
+                .frames
+                .into_iter()
+                .flat_map(|frame| frame.to_bytes())
+                .collect(),
+        );
+
+        bytes
+    }
+}
+
 /// Parses the given [`u8`] [`slice`] into a [`Tag`]. This operation gives [`None`] if an only if
 /// the header failes to parse.
 ///
@@ -52,14 +68,14 @@ impl Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ParseError::CouldNotParseHeader => {
-                write!(f, "Expected an ID3v2 header but could not parse it")
+                write!(f, "expected an ID3v2 header but could not parse it")
             }
             ParseError::NoHeaderExtension => write!(
                 f,
-                "Expected an extension to the ID3v2 header but could not parse it"
+                "expected an extension to the ID3v2 header but could not parse it"
             ),
-            ParseError::NotEnoughBytes => write!(f, "Not enough bytes to parse ID3v2 tag"),
-            ParseError::BadId => write!(f, "Expected ID3 tag ID was not present"),
+            ParseError::NotEnoughBytes => write!(f, "not enough bytes to parse ID3v2 tag"),
+            ParseError::BadId => write!(f, "expected ID3 tag ID was not present"),
         }
     }
 }
@@ -198,6 +214,9 @@ pub struct Header {
 }
 
 #[derive(Debug, Clone, Copy)]
+struct HeaderFlags(u8);
+
+#[derive(Debug, Clone, Copy)]
 pub struct ExtendedHeader {
     /// Total size of the extended header, this is either 6 or 10 bytes, depending on whether CRC
     /// data is present.
@@ -209,6 +228,9 @@ pub struct ExtendedHeader {
     /// Optional CRC data.
     total_frame_crc: Option<u32>,
 }
+
+#[derive(Debug, Clone, Copy)]
+struct ExtendedHeaderFlags(u16);
 
 /// A frame with a [`FrameHeader`], and unparsed data thereafter. The included `data` field will
 /// have a length equal to the [`FrameHeader`]'s `size` field.
@@ -241,12 +263,6 @@ struct FrameHeader {
 
     flags: FrameHeaderFlags,
 }
-
-#[derive(Debug, Clone, Copy)]
-struct HeaderFlags(u8);
-
-#[derive(Debug, Clone, Copy)]
-struct ExtendedHeaderFlags(u16);
 
 #[derive(Debug, Clone, Copy)]
 struct FrameHeaderFlags(u16);
@@ -315,59 +331,18 @@ impl Header {
             _ => Err(ParseError::BadId),
         }
     }
-}
 
-impl Frame {
-    /// Compute the text of a [`Frame`].
-    ///
-    /// [`Frame`]: Frame
-    fn text(&self) -> Option<String> {
-        let encoding_part = self.data[0];
-        let text_part = &self.data[1..];
+    fn to_bytes(self) -> Vec<u8> {
+        let mut bytes: Vec<u8> = Vec::new();
+        bytes.append(&mut self.version.to_be_bytes().into());
+        bytes.append(&mut self.flags.0.to_be_bytes().into());
+        bytes.append(&mut self.size.to_be_bytes().into());
 
-        match encoding_part {
-            // ISO-8859-1
-            0x00 => {
-                let end = text_part
-                    .iter()
-                    .position(|&c| c == 0)
-                    .unwrap_or(text_part.len());
-                String::from_utf8(text_part[..end].to_vec()).ok()
-            }
-
-            // 16-bit unicode.
-            0x01 => {
-                let byte_order = &text_part[0..2];
-                let text = &text_part[2..];
-                let words: Vec<u16> = match byte_order {
-                    [0xFF, 0xFE] => (0..text.len() / 2)
-                        .map(|i| u16::from_le_bytes([text[i * 2], text[i * 2 + 1]]))
-                        .collect(),
-                    [0xFE, 0xFF] => (0..text.len() / 2)
-                        .map(|i| u16::from_be_bytes([text[i * 2], text[i * 2 + 1]]))
-                        .collect(),
-                    _ => return None,
-                };
-
-                let end = words.iter().position(|&c| c == 0).unwrap_or(words.len());
-
-                String::from_utf16(&words[..end]).ok()
-            }
-
-            _ => return None,
+        if let Some(extended_header) = self.extended_header {
+            bytes.append(&mut extended_header.to_bytes());
         }
-    }
-}
 
-impl Display for Frame {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ID: {:?}", String::from_utf8(self.header.id.to_vec()))
-    }
-}
-
-impl Display for FrameHeader {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ID: {:?}", String::from_utf8(self.id.to_vec()))
+        bytes
     }
 }
 
@@ -425,6 +400,19 @@ impl ExtendedHeader {
             Ok((extended_header, &bytes[10..]))
         }
     }
+
+    fn to_bytes(self) -> Vec<u8> {
+        let mut bytes: Vec<u8> = Vec::new();
+        bytes.append(&mut self.extended_header_size.to_be_bytes().into());
+        bytes.append(&mut self.extended_flags.0.to_be_bytes().into());
+        bytes.append(&mut self.size_of_padding.to_be_bytes().into());
+
+        if let Some(total_frame_crc) = self.total_frame_crc {
+            bytes.append(&mut total_frame_crc.to_be_bytes().into());
+        }
+
+        bytes
+    }
 }
 
 impl Frame {
@@ -439,6 +427,53 @@ impl Frame {
 
         let data = bytes[0..header.size as usize].to_vec();
         Some((Frame { header, data }, &bytes[header.size as usize..]))
+    }
+
+    fn to_bytes(mut self) -> Vec<u8> {
+        let mut bytes: Vec<u8> = Vec::new();
+        bytes.append(&mut self.header.to_bytes());
+        bytes.append(&mut self.data);
+        bytes
+    }
+
+    /// Compute the text of a [`Frame`].
+    ///
+    /// [`Frame`]: Frame
+    fn text(&self) -> Option<String> {
+        let encoding_part = self.data[0];
+        let text_part = &self.data[1..];
+
+        match encoding_part {
+            // ISO-8859-1
+            0x00 => {
+                let end = text_part
+                    .iter()
+                    .position(|&c| c == 0)
+                    .unwrap_or(text_part.len());
+                String::from_utf8(text_part[..end].to_vec()).ok()
+            }
+
+            // 16-bit unicode.
+            0x01 => {
+                let byte_order = &text_part[0..2];
+                let text = &text_part[2..];
+                let words: Vec<u16> = match byte_order {
+                    [0xFF, 0xFE] => (0..text.len() / 2)
+                        .map(|i| u16::from_le_bytes([text[i * 2], text[i * 2 + 1]]))
+                        .collect(),
+                    [0xFE, 0xFF] => (0..text.len() / 2)
+                        .map(|i| u16::from_be_bytes([text[i * 2], text[i * 2 + 1]]))
+                        .collect(),
+                    _ => return None,
+                };
+
+                let end = words.iter().position(|&c| c == 0).unwrap_or(words.len());
+
+                String::from_utf16(&words[..end]).ok()
+            }
+
+            _ => return None,
+        }
     }
 }
 
@@ -465,6 +500,14 @@ impl FrameHeader {
             },
             &bytes[10..],
         ))
+    }
+
+    fn to_bytes(self) -> Vec<u8> {
+        let mut bytes: Vec<u8> = Vec::new();
+        bytes.append(&mut self.id.into());
+        bytes.append(&mut self.size.to_be_bytes().into());
+        bytes.append(&mut self.flags.0.to_be_bytes().into());
+        bytes
     }
 }
 

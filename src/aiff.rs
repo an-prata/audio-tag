@@ -120,54 +120,36 @@ impl Error for ParseError {}
 impl Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ParseError::Io(error) => write!(f, "Could not parse AIFF: IO error: {}", error),
+            ParseError::Io(error) => write!(f, "could not parse AIFF: IO error: {}", error),
             ParseError::ExcessTopLevelChunks => write!(
                 f,
-                "Too many top level chunks. AIFF files should have a single top level FORM chunk."
+                "too many top level chunks, AIFF files should have a single top level FORM chunk"
             ),
             ParseError::ExpectedFormChunk => {
-                write!(f, "Could not find a FORM chunk when one was expected.")
+                write!(f, "could not find a FORM chunk when one was expected")
             }
             ParseError::UnexpectedFormChunk => {
-                write!(f, "Did not expect a FORM chunk but one was found.")
+                write!(f, "did not expect a FORM chunk but one was found")
             }
             ParseError::ExpectedCommonChunk => {
-                write!(f, "Expected a common chunk but none were found.")
+                write!(f, "expected a common chunk but none were found")
             }
             ParseError::TooManyCommonChunks => write!(
                 f,
-                "Too many common chunks present. An AIFF may only have one common chunk."
+                "too many common chunks present, an AIFF may only have one common chunk"
             ),
             ParseError::ExpectedSoundChunk => write!(
                 f,
-                "Number of samples was not zero but no sound data chunk was present."
+                "number of samples was not zero but no sound data chunk was present"
             ),
             ParseError::TooManySoundChunks => write!(
                 f,
-                "Too many sound data chunks present. An AIFF may only have one sound data chunk."
+                "too many sound data chunks present, an AIFF may only have one sound data chunk"
             ),
-            ParseError::TooManyId3Chunks => write!(f, "Too many ID3 chunks, expected only one."),
+            ParseError::TooManyId3Chunks => write!(f, "too many ID3 chunks, expected only one"),
         }
     }
 }
-
-/// Type alias for chunk IDs, which are four bytes meant to be understood as characters.
-type ChunkID = [u8; 4];
-
-const ID_FORM: ChunkID = *b"FORM";
-const ID_COMMON: ChunkID = *b"COMM";
-const ID_SOUND_DATA: ChunkID = *b"SSND";
-const ID_MARKER: ChunkID = *b"MARK";
-const ID_INSTRUMENT: ChunkID = *b"INST";
-const ID_MIDI_DATA: ChunkID = *b"MIDI";
-const ID_AUDIO_RECORDING: ChunkID = *b"AESD";
-const ID_APPLICATION_SPECIFIC: ChunkID = *b"APPL";
-const ID_COMMENTS: ChunkID = *b"COMT";
-const ID_NAME: ChunkID = *b"NAME";
-const ID_AUTHOR: ChunkID = *b"AUTH";
-const ID_COPYRIGHT: ChunkID = *b"(c) ";
-const ID_ANNOTATION: ChunkID = *b"ANNO";
-const ID_ID3V2: ChunkID = *b"ID3 ";
 
 #[derive(Debug, Clone)]
 enum Chunk {
@@ -186,6 +168,141 @@ enum Chunk {
     Copyright(CopyrightChunk),
     Annotation(AnnotationChunk),
     Id3v2(Id3v2Chunk),
+}
+
+impl Chunk {
+    /// Discard the typing of the given [`Chunk`] and give a [`TypelessChunk`] containing the same
+    /// data/bytes.
+    ///
+    /// [`Chunk`]: Chunk
+    /// [`TypelessChunk`]: TypelessChunk
+    fn untype(self) -> TypelessChunk {
+        match self {
+            Chunk::Typeless(typeless_chunk) => typeless_chunk,
+
+            Chunk::Form(form_chunk) => {
+                let mut bytes: Vec<u8> = Vec::new();
+                bytes.append(&mut form_chunk.form_type.into());
+                bytes.append(
+                    &mut form_chunk
+                        .chunks
+                        .into_iter()
+                        .flat_map(|c| c.untype().to_bytes())
+                        .collect(),
+                );
+
+                TypelessChunk {
+                    id: ID_FORM,
+                    data: bytes,
+                }
+            }
+
+            Chunk::Common(common_chunk) => {
+                let mut bytes: Vec<u8> = Vec::new();
+                bytes.append(&mut common_chunk.channels.to_le_bytes().into());
+                bytes.append(&mut common_chunk.num_sample_frames.to_le_bytes().into());
+                bytes.append(&mut common_chunk.sample_size.to_le_bytes().into());
+                bytes.append(&mut common_chunk.sample_rate.to_le_bytes().into());
+
+                TypelessChunk {
+                    id: ID_COMMON,
+                    data: bytes,
+                }
+            }
+
+            Chunk::SoundData(mut sound_data_chunk) => {
+                let mut bytes: Vec<u8> = Vec::new();
+                bytes.append(&mut sound_data_chunk.offset.to_be_bytes().into());
+                bytes.append(&mut sound_data_chunk.block_size.to_be_bytes().into());
+                bytes.append(&mut sound_data_chunk.sound_data);
+
+                TypelessChunk {
+                    id: ID_SOUND_DATA,
+                    data: bytes,
+                }
+            }
+
+            Chunk::Marker(mut marker_chunk) => {
+                let mut bytes: Vec<u8> = Vec::new();
+                bytes.append(&mut marker_chunk.num_markers.to_be_bytes().into());
+                bytes.append(&mut marker_chunk.markers);
+
+                TypelessChunk {
+                    id: ID_MARKER,
+                    data: bytes,
+                }
+            }
+
+            Chunk::Instrument(instrument_chunk) => {
+                let mut bytes: Vec<u8> = Vec::new();
+                bytes.append(&mut instrument_chunk.base_note.to_le_bytes().into());
+                bytes.append(&mut instrument_chunk.detune.to_le_bytes().into());
+                bytes.append(&mut instrument_chunk.low_note.to_le_bytes().into());
+                bytes.append(&mut instrument_chunk.high_note.to_le_bytes().into());
+                bytes.append(&mut instrument_chunk.low_velocity.to_le_bytes().into());
+                bytes.append(&mut instrument_chunk.high_velocity.to_le_bytes().into());
+                bytes.append(&mut instrument_chunk.gain.to_le_bytes().into());
+                bytes.append(&mut instrument_chunk.sustain_loop.to_bytes());
+                bytes.append(&mut instrument_chunk.release_loop.to_bytes());
+
+                TypelessChunk {
+                    id: ID_INSTRUMENT,
+                    data: bytes,
+                }
+            }
+
+            Chunk::MidiData(midi_data_chunk) => TypelessChunk {
+                id: ID_MIDI_DATA,
+                data: midi_data_chunk.midi_data,
+            },
+
+            Chunk::AudioRecording(audio_recording_chunk) => TypelessChunk {
+                id: ID_AUDIO_RECORDING,
+                data: audio_recording_chunk.aes_channel_status_data.into(),
+            },
+
+            Chunk::ApplicationSpecific(application_specific_chunk) => TypelessChunk {
+                id: ID_APPLICATION_SPECIFIC,
+                data: application_specific_chunk.data,
+            },
+
+            Chunk::Comments(mut comments_chunk) => {
+                let mut bytes: Vec<u8> = Vec::new();
+                bytes.append(&mut comments_chunk.num_comments.to_be_bytes().into());
+                bytes.append(&mut comments_chunk.comments);
+
+                TypelessChunk {
+                    id: ID_COMMENTS,
+                    data: bytes,
+                }
+            }
+
+            Chunk::Name(name_chunk) => TypelessChunk {
+                id: ID_NAME,
+                data: name_chunk.text,
+            },
+
+            Chunk::Author(author_chunk) => TypelessChunk {
+                id: ID_AUTHOR,
+                data: author_chunk.text,
+            },
+
+            Chunk::Copyright(copyright_chunk) => TypelessChunk {
+                id: ID_COPYRIGHT,
+                data: copyright_chunk.text,
+            },
+
+            Chunk::Annotation(annotation_chunk) => TypelessChunk {
+                id: ID_ANNOTATION,
+                data: annotation_chunk.text,
+            },
+
+            Chunk::Id3v2(id3v2_chunk) => TypelessChunk {
+                id: ID_ID3V2,
+                data: id3v2_chunk.tag.to_bytes(),
+            },
+        }
+    }
 }
 
 /// Creates an [`Iterator`] over all chunks in a given slice of bytes.
@@ -313,6 +430,7 @@ struct MarkerChunk {
     markers: Vec<u8>,
 }
 
+/// Instrument chunks are optional and no more than one may appear in a FORM AIFF.
 #[derive(Debug, Clone, Copy)]
 struct InstrumentChunk {
     /// The base MIDI note that the instrument plays. A value of 60 is middle C, values 0 through
@@ -523,6 +641,24 @@ struct Comment<'t> {
     text: &'t [u8],
 }
 
+/// Type alias for chunk IDs, which are four bytes meant to be understood as characters.
+type ChunkID = [u8; 4];
+
+const ID_FORM: ChunkID = *b"FORM";
+const ID_COMMON: ChunkID = *b"COMM";
+const ID_SOUND_DATA: ChunkID = *b"SSND";
+const ID_MARKER: ChunkID = *b"MARK";
+const ID_INSTRUMENT: ChunkID = *b"INST";
+const ID_MIDI_DATA: ChunkID = *b"MIDI";
+const ID_AUDIO_RECORDING: ChunkID = *b"AESD";
+const ID_APPLICATION_SPECIFIC: ChunkID = *b"APPL";
+const ID_COMMENTS: ChunkID = *b"COMT";
+const ID_NAME: ChunkID = *b"NAME";
+const ID_AUTHOR: ChunkID = *b"AUTH";
+const ID_COPYRIGHT: ChunkID = *b"(c) ";
+const ID_ANNOTATION: ChunkID = *b"ANNO";
+const ID_ID3V2: ChunkID = *b"ID3 ";
+
 impl TypelessChunk {
     /// Gives a [`Chunk`] reference from a slice of bytes. This function does check to make sure all
     /// memory that the [`Chunk`] will have within itself and its `data` field are within the slice.
@@ -543,6 +679,16 @@ impl TypelessChunk {
             },
             &bytes[8 + size as usize..],
         ))
+    }
+
+    /// Turn the [`TypelessChunk`] back into the bytes which made it up in the original AIFF file.
+    ///
+    /// [`TypelessChunk`]: TypelessChunk
+    fn to_bytes(mut self) -> Vec<u8> {
+        let mut bytes: Vec<u8> = Vec::new();
+        bytes.append(&mut self.id.to_vec());
+        bytes.append(&mut self.data);
+        bytes
     }
 
     /// Type this [`TypelessChunk`] by parsing its `id` field.
@@ -575,6 +721,10 @@ impl TypelessChunk {
     /// [`FormChunk`]: FormChunk
     /// [`TypelessChunk`]: TypelessChunk
     fn form_chunk(self) -> Option<FormChunk> {
+        if self.data.len() < 4 {
+            return None;
+        }
+
         match self.id {
             ID_FORM => Some(FormChunk {
                 form_type: *self.data[0..4].as_array()?,
@@ -808,7 +958,33 @@ impl TypelessChunk {
     }
 }
 
+impl Loop {
+    /// Get the bytes of the given [`Loop`].
+    ///
+    /// [`Loop`]: Loop
+    fn to_bytes(self) -> Vec<u8> {
+        let mut bytes: Vec<u8> = Vec::new();
+        bytes.append(&mut self.play_mode.to_i16().to_be_bytes().to_vec());
+        bytes.append(&mut self.begin_loop.to_be_bytes().to_vec());
+        bytes.append(&mut self.end_loop.to_be_bytes().to_vec());
+        bytes
+    }
+}
+
 impl LoopPlayMode {
+    /// Turns the [`LoopPlayMode`] back into its original [`i16`] representation from within the IFF
+    /// file.
+    ///
+    /// [`LoopPlayMode`]: LoopPlayMode
+    /// [`i16`]: i16
+    fn to_i16(self) -> i16 {
+        match self {
+            LoopPlayMode::NoLooping => 0,
+            LoopPlayMode::ForwardLooping => 1,
+            LoopPlayMode::ForwardBackwardLooping => 2,
+        }
+    }
+
     /// Creates a [`LoopPlayMode`] from an [`i16`] value, as it should be understood within an AIFF.
     ///
     /// [`LoopPlayMode`]: LoopPlayMode
