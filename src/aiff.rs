@@ -71,10 +71,36 @@ impl Audio for File {
 
 impl AudioTagged for File {
     fn get_tag(&self, audio_tag: AudioTag) -> Option<String> {
-        self.form_aiff.chunks.iter().find_map(|c| match c {
-            Chunk::Id3v2(Id3v2Chunk { tag }) => tag.get_tag(audio_tag),
-            _ => None,
-        })
+        self.form_aiff
+            .chunks
+            .iter()
+            .find_map(|c| match c {
+                Chunk::Id3v2(Id3v2Chunk { tag }) => tag.get_tag(audio_tag),
+                _ => None,
+            })
+            .or_else(|| match audio_tag {
+                AudioTag::LeadArtist => self.form_aiff.chunks.iter().find_map(|c| match c {
+                    Chunk::Author(author_chunk) => {
+                        String::from_utf8(author_chunk.text.to_owned()).ok()
+                    }
+
+                    _ => None,
+                }),
+
+                AudioTag::Title => self.form_aiff.chunks.iter().find_map(|c| match c {
+                    Chunk::Name(name_chunk) => String::from_utf8(name_chunk.text.to_owned()).ok(),
+                    _ => None,
+                }),
+
+                AudioTag::CopyrightMessage => self.form_aiff.chunks.iter().find_map(|c| match c {
+                    Chunk::Copyright(copyright_chunk) => {
+                        String::from_utf8(copyright_chunk.text.to_owned()).ok()
+                    }
+                    _ => None,
+                }),
+
+                _ => None,
+            })
     }
 }
 
