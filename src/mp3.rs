@@ -147,10 +147,10 @@ impl Error for ParseError {}
 impl Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ParseError::Io(error) => write!(f, "MP3 parse error: IO: {}", error),
-            ParseError::ExpectedId3v1 => write!(f, "MP3 parse error: Expected ID3v1 tag"),
+            ParseError::Io(error) => write!(f, "io error while parsing MP3: {}", error),
+            ParseError::ExpectedId3v1 => write!(f, "expected ID3v1 tag"),
             ParseError::Id3v2ParseError(parse_error) => {
-                write!(f, "MP3 parse error: ID3v2 parse error: {}", parse_error)
+                write!(f, "ID3v2 parse error while parsing MP3: {}", parse_error)
             }
         }
     }
