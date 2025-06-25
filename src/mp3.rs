@@ -16,77 +16,6 @@ pub struct File {
     pub tag: Tag,
 }
 
-/// An ID3 tag, either [`id3v1::Tag`] or [`id3v2::Tag`]>
-///
-/// [`id3v1::Tag`]: id3v1::Tag
-/// [`id3v2::Tag`]: id3v2::Tag
-pub enum Tag {
-    /// ID3 version 2 tag.
-    Id3v2(id3v2::Tag),
-
-    /// ID3 version 1 tag.
-    Id3v1(id3v1::Tag),
-}
-
-/// A single MP3 frame.
-pub struct Frame {
-    /// The [`Frame`]'s header, containing bit rate and sample information among other things.
-    ///
-    /// [`Frame`]: Frame
-    pub header: FrameHeader,
-
-    /// The [`Frame`]'s raw frame data. This is what comes after the [`FrameHeader`] and is unparsed
-    /// here. The sounds data is not decrompressed here.
-    ///
-    /// [`Frame`]: Frame
-    /// [`FrameHeader`]: FrameHeader
-    pub data: Vec<u8>,
-}
-
-/// An MP3 frame header. MP3 (MPEG-1 Audio Layer III or MPEG-2 Audio Layer III) does not have file
-/// headers, instead it is made up or largely independant frames, each with their own 32-bit
-/// headers. The frames are not _entirely_ independant in the case of variable bit rate.
-pub struct FrameHeader(u32);
-
-/// An [`Iterator`] over [`Frame`]s from an MP3 file.
-///
-/// [`Iterator`]: Iterator
-/// [`Frame`]: Frame
-struct FramesIter<'b> {
-    /// The remaining bytes after the last call to [`next`].
-    ///
-    /// [`next`]: Iterator::next
-    remaining_bytes: &'b [u8],
-}
-
-/// Alias for a [`Result`] with the error pre-filled as a [`ParseError`].
-///
-/// [`Result`]: result::Result
-/// [`ParseError`]: ParseError
-pub type Result<T> = result::Result<T, ParseError>;
-
-/// Errors which may occur when parsing an MP3.
-#[derive(Debug)]
-pub enum ParseError {
-    /// IO errors.
-    Io(io::Error),
-
-    /// Expected an ID3v1 tag.
-    ExpectedId3v1,
-
-    /// An error parsing an ID3v2 tag.
-    Id3v2ParseError(id3v2::ParseError),
-}
-
-impl AudioTagged for Tag {
-    fn get_tag(&self, audio_tag: AudioTag) -> Option<String> {
-        match self {
-            Tag::Id3v2(tag) => tag.get_tag(audio_tag),
-            Tag::Id3v1(tag) => tag.get_tag(audio_tag),
-        }
-    }
-}
-
 impl File {
     /// Open and parse an MP3 file for reading track info.
     pub fn open(path: impl AsRef<Path>) -> Result<File> {
@@ -132,29 +61,46 @@ impl AudioTagged for File {
     }
 }
 
-impl<'d> Iterator for FramesIter<'d> {
-    type Item = Frame;
+/// An ID3 tag, either [`id3v1::Tag`] or [`id3v2::Tag`]>
+///
+/// [`id3v1::Tag`]: id3v1::Tag
+/// [`id3v2::Tag`]: id3v2::Tag
+pub enum Tag {
+    /// ID3 version 2 tag.
+    Id3v2(id3v2::Tag),
 
-    fn next(&mut self) -> Option<Self::Item> {
-        let (frame, remaining_bytes) = Frame::from_bytes(self.remaining_bytes)?;
-        self.remaining_bytes = remaining_bytes;
-        Some(frame)
-    }
+    /// ID3 version 1 tag.
+    Id3v1(id3v1::Tag),
 }
 
-impl Error for ParseError {}
-
-impl Display for ParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl AudioTagged for Tag {
+    fn get_tag(&self, audio_tag: AudioTag) -> Option<String> {
         match self {
-            ParseError::Io(error) => write!(f, "io error while parsing MP3: {}", error),
-            ParseError::ExpectedId3v1 => write!(f, "expected ID3v1 tag"),
-            ParseError::Id3v2ParseError(parse_error) => {
-                write!(f, "ID3v2 parse error while parsing MP3: {}", parse_error)
-            }
+            Tag::Id3v2(tag) => tag.get_tag(audio_tag),
+            Tag::Id3v1(tag) => tag.get_tag(audio_tag),
         }
     }
 }
+
+/// A single MP3 frame.
+pub struct Frame {
+    /// The [`Frame`]'s header, containing bit rate and sample information among other things.
+    ///
+    /// [`Frame`]: Frame
+    pub header: FrameHeader,
+
+    /// The [`Frame`]'s raw frame data. This is what comes after the [`FrameHeader`] and is unparsed
+    /// here. The sounds data is not decrompressed here.
+    ///
+    /// [`Frame`]: Frame
+    /// [`FrameHeader`]: FrameHeader
+    pub data: Vec<u8>,
+}
+
+/// An MP3 frame header. MP3 (MPEG-1 Audio Layer III or MPEG-2 Audio Layer III) does not have file
+/// headers, instead it is made up or largely independant frames, each with their own 32-bit
+/// headers. The frames are not _entirely_ independant in the case of variable bit rate.
+pub struct FrameHeader(u32);
 
 impl Frame {
     /// Parse a [`Frame`] from the given [`slice`] of bytes, returning the [`Frame`] and the left
@@ -176,6 +122,60 @@ impl Frame {
         let data = remaining_bytes[..frame_length].to_vec();
         let remaining_bytes = &remaining_bytes[frame_length..];
         Some((Frame { header, data }, remaining_bytes))
+    }
+}
+
+/// An [`Iterator`] over [`Frame`]s from an MP3 file.
+///
+/// [`Iterator`]: Iterator
+/// [`Frame`]: Frame
+struct FramesIter<'b> {
+    /// The remaining bytes after the last call to [`next`].
+    ///
+    /// [`next`]: Iterator::next
+    remaining_bytes: &'b [u8],
+}
+
+impl<'d> Iterator for FramesIter<'d> {
+    type Item = Frame;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (frame, remaining_bytes) = Frame::from_bytes(self.remaining_bytes)?;
+        self.remaining_bytes = remaining_bytes;
+        Some(frame)
+    }
+}
+
+/// Alias for a [`Result`] with the error pre-filled as a [`ParseError`].
+///
+/// [`Result`]: result::Result
+/// [`ParseError`]: ParseError
+pub type Result<T> = result::Result<T, ParseError>;
+
+/// Errors which may occur when parsing an MP3.
+#[derive(Debug)]
+pub enum ParseError {
+    /// IO errors.
+    Io(io::Error),
+
+    /// Expected an ID3v1 tag.
+    ExpectedId3v1,
+
+    /// An error parsing an ID3v2 tag.
+    Id3v2ParseError(id3v2::ParseError),
+}
+
+impl Error for ParseError {}
+
+impl Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ParseError::Io(error) => write!(f, "io error while parsing MP3: {}", error),
+            ParseError::ExpectedId3v1 => write!(f, "expected ID3v1 tag"),
+            ParseError::Id3v2ParseError(parse_error) => {
+                write!(f, "ID3v2 parse error while parsing MP3: {}", parse_error)
+            }
+        }
     }
 }
 
