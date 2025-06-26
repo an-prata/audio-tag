@@ -225,10 +225,10 @@ impl Chunk {
 
             Chunk::Common(common_chunk) => {
                 let mut bytes: Vec<u8> = Vec::new();
-                bytes.append(&mut common_chunk.channels.to_le_bytes().into());
-                bytes.append(&mut common_chunk.num_sample_frames.to_le_bytes().into());
-                bytes.append(&mut common_chunk.sample_size.to_le_bytes().into());
-                bytes.append(&mut common_chunk.sample_rate.to_le_bytes().into());
+                bytes.append(&mut common_chunk.channels.to_be_bytes().into());
+                bytes.append(&mut common_chunk.num_sample_frames.to_be_bytes().into());
+                bytes.append(&mut common_chunk.sample_size.to_be_bytes().into());
+                bytes.append(&mut common_chunk.sample_rate.to_be_bytes().into());
 
                 TypelessChunk {
                     id: ID_COMMON,
@@ -261,13 +261,13 @@ impl Chunk {
 
             Chunk::Instrument(instrument_chunk) => {
                 let mut bytes: Vec<u8> = Vec::new();
-                bytes.append(&mut instrument_chunk.base_note.to_le_bytes().into());
-                bytes.append(&mut instrument_chunk.detune.to_le_bytes().into());
-                bytes.append(&mut instrument_chunk.low_note.to_le_bytes().into());
-                bytes.append(&mut instrument_chunk.high_note.to_le_bytes().into());
-                bytes.append(&mut instrument_chunk.low_velocity.to_le_bytes().into());
-                bytes.append(&mut instrument_chunk.high_velocity.to_le_bytes().into());
-                bytes.append(&mut instrument_chunk.gain.to_le_bytes().into());
+                bytes.append(&mut instrument_chunk.base_note.to_be_bytes().into());
+                bytes.append(&mut instrument_chunk.detune.to_be_bytes().into());
+                bytes.append(&mut instrument_chunk.low_note.to_be_bytes().into());
+                bytes.append(&mut instrument_chunk.high_note.to_be_bytes().into());
+                bytes.append(&mut instrument_chunk.low_velocity.to_be_bytes().into());
+                bytes.append(&mut instrument_chunk.high_velocity.to_be_bytes().into());
+                bytes.append(&mut instrument_chunk.gain.to_be_bytes().into());
                 bytes.append(&mut instrument_chunk.sustain_loop.to_bytes());
                 bytes.append(&mut instrument_chunk.release_loop.to_bytes());
 
@@ -711,8 +711,18 @@ impl TypelessChunk {
     ///
     /// [`TypelessChunk`]: TypelessChunk
     fn to_bytes(mut self) -> Vec<u8> {
+        let chunk_size = self.data.len() as u32;
+
+        let size_0 = chunk_size & 0b_00000000_00000000_00000000_01111111;
+        let size_1 = chunk_size & 0b_00000000_00000000_00111111_10000000;
+        let size_2 = chunk_size & 0b_00000000_00011111_11000000_00000000;
+        let size_3 = chunk_size & 0b_00001111_11100000_00000000_00000000;
+
+        let chunk_size = (size_3 << 3) | (size_2 << 2) | (size_1 << 1) | size_0;
+
         let mut bytes: Vec<u8> = Vec::new();
         bytes.append(&mut self.id.to_vec());
+        bytes.append(&mut chunk_size.to_be_bytes().to_vec());
         bytes.append(&mut self.data);
         bytes
     }
@@ -1102,6 +1112,56 @@ fn validate_form_aiff(form: &FormChunk) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::TypelessChunk;
+    use crate::aiff;
+    use extended::Extended;
+
+    #[test]
+    #[rustfmt::skip]
+    fn form_to_bytes() {
+        let file = aiff::File {
+            form_aiff: aiff::FormChunk {
+                form_type: *b"AIFF",
+                chunks: vec![aiff::Chunk::Common(aiff::CommonChunk {
+                    channels: 2,
+                    num_sample_frames: 0,
+                    sample_size: 16,
+                    sample_rate: Extended::from(48_000_f64),
+                })],
+            },
+        };
+
+        let bytes = aiff::Chunk::Form(file.form_aiff).untype().to_bytes();
+        let expected_size = /* AIFF */ 4 + /* COMM */ 4 + /* common size */ 4 + /* common chunk data */ 18;
+
+        assert_eq!(
+            bytes[0..28],
+            [
+                // FORM ID
+                b'F', b'O', b'R', b'M',
+
+                // Total size, or size of FORM
+                0, 0, 0, expected_size,
+
+                // File type tag "AIFF"
+                b'A', b'I', b'F', b'F',
+
+                // Common chunk tag
+                b'C', b'O', b'M', b'M',
+
+                // common chunk size
+                0, 0, 0, 18,
+
+                // channels
+                0, 2,
+
+                // number of samples
+                0, 0, 0, 0,
+
+                // sample size
+                0, 16,
+            ]
+        )
+    }
 
     #[test]
     fn chunk_from_bytes() {
