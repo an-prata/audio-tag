@@ -1111,13 +1111,15 @@ fn validate_form_aiff(form: &FormChunk) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use core::panic;
+
     use super::TypelessChunk;
     use crate::aiff;
     use extended::Extended;
 
     #[test]
     #[rustfmt::skip]
-    fn form_to_bytes() {
+    fn chunk_to_bytes() {
         let file = aiff::File {
             form_aiff: aiff::FormChunk {
                 form_type: *b"AIFF",
@@ -1182,18 +1184,52 @@ mod tests {
     fn form_chunk() {
         let bytes = [b'F', b'O', b'R', b'M', 0, 0, 0, 4, b'A', b'I', b'F', b'F'];
         let (chunk, _) = TypelessChunk::from_bytes(&bytes).unwrap();
+        let typed_chunk = chunk.typed().unwrap();
 
-        assert_eq!(chunk.form_chunk().unwrap().chunks.len(), 0);
+        match typed_chunk {
+            aiff::Chunk::Form(form_chunk) => {
+                assert_eq!(form_chunk.form_type, *b"AIFF");
+                assert_eq!(form_chunk.chunks.len(), 0);
+            }
+
+            _ => panic!("Expected FORM chunk"),
+        }
     }
 
     #[test]
+    #[rustfmt::skip]
     fn common_chunk() {
         let bytes = [
-            b'C', b'O', b'M', b'M', 0, 0, 0, 18, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-            16, 17, 18,
-        ];
-        let (chunk, _) = TypelessChunk::from_bytes(&bytes).unwrap();
+            // ID
+            b'C', b'O', b'M', b'M',
 
-        assert!(chunk.common_chunk().is_some());
+            // Size
+            0, 0, 0, 18,
+
+            // Channels
+            0, 2,
+
+            // Number of samples
+            255, 255, 255, 255,
+
+            // Sample size
+            0, 32,
+
+            // Sample rate (just nonsense for now)
+            9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+        ];
+
+        let (chunk, _) = TypelessChunk::from_bytes(&bytes).unwrap();
+        let typed_chunk= chunk.typed().unwrap();
+
+        match typed_chunk{
+            aiff::Chunk::Common(common_chunk) => {
+                assert_eq!(common_chunk.channels, 2);
+                assert_eq!(common_chunk.num_sample_frames, u32::MAX);
+                assert_eq!(common_chunk.sample_size, 32);
+            },
+
+            _ => panic!("Expected chunk to be a common chunk"),
+        }
     }
 }
