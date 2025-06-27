@@ -3,7 +3,14 @@ use crate::{
     id3v2,
 };
 use extended::Extended;
-use std::{error::Error, fmt::Display, fs, io, path::Path, result};
+use std::{
+    error::Error,
+    fmt::Display,
+    fs,
+    io::{self, Write},
+    path::Path,
+    result,
+};
 
 /// An AIFF file (FORM AIFF).
 #[derive(Debug, Clone)]
@@ -18,7 +25,7 @@ pub struct File {
 
 impl File {
     /// Open and parse an AIFF (FORM AIFF) file.
-    pub fn open(path: impl AsRef<Path>) -> Result<File> {
+    pub fn read_from(path: impl AsRef<Path>) -> Result<File> {
         let bytes = fs::read(path).map_err(|e| ParseError::Io(e))?;
         let mut top_level_chunks: Vec<Chunk> = parse_chunks(&bytes).collect();
 
@@ -36,6 +43,20 @@ impl File {
 
             _ => Err(ParseError::ExpectedFormChunk),
         }
+    }
+
+    /// Write this [`aiff::File`] to a file at the given [`AsRef<Path>`], creating it if it does not
+    /// already exist.
+    ///
+    /// [`aiff::File`]: File
+    /// [`AsRef<Path>`]: AsRef<Path>
+    pub fn write_to(self, path: impl AsRef<Path>) -> Result<()> {
+        let bytes = Chunk::Form(self.form_aiff).untype().to_bytes();
+        let mut file = fs::File::create(path).map_err(|io_err| ParseError::Io(io_err))?;
+        file.write_all(&bytes)
+            .map_err(|io_err| ParseError::Io(io_err))?;
+
+        Ok(())
     }
 
     /// Get this FORM AIFF file's [`CommonChunk`].
