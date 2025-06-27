@@ -287,10 +287,16 @@ impl Chunk {
                 data: audio_recording_chunk.aes_channel_status_data.into(),
             },
 
-            Chunk::ApplicationSpecific(application_specific_chunk) => TypelessChunk {
-                id: ID_APPLICATION_SPECIFIC,
-                data: application_specific_chunk.data,
-            },
+            Chunk::ApplicationSpecific(mut application_specific_chunk) => {
+                let mut bytes: Vec<u8> = Vec::new();
+                bytes.append(&mut application_specific_chunk.application_signature.to_vec());
+                bytes.append(&mut application_specific_chunk.data);
+
+                TypelessChunk {
+                    id: ID_APPLICATION_SPECIFIC,
+                    data: bytes,
+                }
+            }
 
             Chunk::Comments(mut comments_chunk) => {
                 let mut bytes: Vec<u8> = Vec::new();
