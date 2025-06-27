@@ -1,3 +1,5 @@
+/// A trait for types which contain audio, and can give information about the audio and how it was
+/// recorded/sampled.
 pub trait Audio {
     /// Sample rate of the sound in hertz.
     fn sample_rate(&self) -> f64;
@@ -9,6 +11,8 @@ pub trait Audio {
     fn channels(&self) -> u16;
 }
 
+/// A trait for types which either contain audio or are associated with some audio and can give
+/// information about the audio including but not limited to the artist, album, title, etc.
 pub trait AudioTagged {
     /// Get the tag information of the requested [`AudioTag`].
     ///
