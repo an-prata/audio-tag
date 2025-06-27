@@ -198,22 +198,59 @@ impl Display for ParseError {
     }
 }
 
+/// Contains all the possible chunk types that this module will use.
 #[derive(Debug, Clone)]
 enum Chunk {
+    /// A chunk without a currently parsed type. This chunk includes a four byte/character ID and
+    /// raw data in the form of a [`Vec<u8>`].
+    ///
+    /// [`Vec<u8>`]: Vec<u8>
     Typeless(TypelessChunk),
+
+    /// A "FORM" chunk, which wraps the other chunks in an AIFF file.
     Form(FormChunk),
+
+    /// A common chunk contains basic and necessary information about the sound data in an AIFF
+    /// file.
     Common(CommonChunk),
+
+    /// The AIFF's actuall sound data, which includes samples as per the common chunk's spec.
     SoundData(SoundDataChunk),
+
+    /// Contains all the AIFF's markers, which can add info/text to certain points between samples.
     Marker(MarkerChunk),
+
+    /// An instrument chunk, containing information about how an intrument should sound.
     Instrument(InstrumentChunk),
+
+    /// Contains MIDI data.
     MidiData(MidiDataChunk),
+
+    /// Contains information about/for audio recording devices.
     AudioRecording(AudioRecordingChunk),
+
+    /// Application specific chunk, who's spec is determined by the application using it.
     ApplicationSpecific(ApplicationSpecificChunk),
+
+    /// Contains textual comments.
     Comments(CommentsChunk),
+
+    /// Contains the name of the track/audio.
     Name(NameChunk),
+
+    /// Contains the author/creator of the sound's name.
     Author(AuthorChunk),
+
+    /// Contains the copyright message, which is what would come immediately after "©". e.g. "1988
+    /// Apple Computer, Inc." means "© 1988 Apple Computer, Inc.".
     Copyright(CopyrightChunk),
+
+    /// Contains a comment, though its use is discourages in favor of a [`CommentsChunk`].
+    ///
+    /// [`CommentsChunk`]: CommentsChunk
     Annotation(AnnotationChunk),
+
+    /// Not in the AIFF 1.3 spec, but this chunk holds ID3v2 tag info about the track.
     Id3v2(Id3v2Chunk),
 }
 
