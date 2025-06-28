@@ -3,6 +3,7 @@ use std::mem::{self, transmute};
 
 /// Packed struct for directly transmuting from bytes.
 #[repr(packed)]
+#[derive(PartialEq, Eq, Debug)]
 pub struct Tag {
     id: [u8; 3],
     title: [u8; 30],
@@ -27,7 +28,7 @@ impl Tag {
     /// [`Tag`]: Tag
     /// [`None`]: Option::None
     /// [`slice`]: std::slice
-    fn from_bytes(bytes: &[u8]) -> Option<(Tag, &[u8])> {
+    pub fn from_bytes(bytes: &[u8]) -> Option<(Tag, &[u8])> {
         if bytes.len() < size_of::<Tag>() {
             return None;
         }
@@ -68,11 +69,57 @@ impl AudioTagged for Tag {
 
 #[cfg(test)]
 mod tests {
-    use crate::id3v1::Tag;
+    use super::*;
 
     #[test]
     fn tag_size() {
         // ID3v1 standard is exactly and always 128 bytes.
         assert_eq!(size_of::<Tag>(), 128);
+    }
+
+    #[test]
+    fn to_bytes() {
+        let tag = Tag {
+            id: *b"TAG",
+            title: [0b_1000_0000; _],
+            artist: [0b_0100_0000; _],
+            album: [0b_0010_0000; _],
+            year: [0b_0001_0000; _],
+            comment: [0b_0000_1000; _],
+            genre: 0b_0000_0100,
+        };
+
+        let mut bytes = vec![b'T', b'A', b'G'];
+        bytes.append(&mut [0b_1000_0000; 30].to_vec());
+        bytes.append(&mut [0b_0100_0000; 30].to_vec());
+        bytes.append(&mut [0b_0010_0000; 30].to_vec());
+        bytes.append(&mut [0b_0001_0000; 4].to_vec());
+        bytes.append(&mut [0b_0000_1000; 30].to_vec());
+        bytes.push(0b_0000_0100);
+
+        assert_eq!(bytes, tag.to_bytes());
+    }
+
+    #[test]
+    fn from_bytes() {
+        let mut bytes = vec![b'T', b'A', b'G'];
+        bytes.append(&mut [0b_1000_0000; 30].to_vec());
+        bytes.append(&mut [0b_0100_0000; 30].to_vec());
+        bytes.append(&mut [0b_0010_0000; 30].to_vec());
+        bytes.append(&mut [0b_0001_0000; 4].to_vec());
+        bytes.append(&mut [0b_0000_1000; 30].to_vec());
+        bytes.push(0b_0000_0100);
+
+        let tag = Tag {
+            id: *b"TAG",
+            title: [0b_1000_0000; _],
+            artist: [0b_0100_0000; _],
+            album: [0b_0010_0000; _],
+            year: [0b_0001_0000; _],
+            comment: [0b_0000_1000; _],
+            genre: 0b_0000_0100,
+        };
+
+        assert_eq!(Tag::from_bytes(&bytes).map(|tuple| tuple.0), Some(tag));
     }
 }
