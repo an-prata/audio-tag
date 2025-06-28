@@ -3,7 +3,7 @@ use std::fmt::Display;
 use crate::audio_info::{AudioTag, AudioTagged};
 
 /// An ID3v2 tag.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tag {
     /// The tag's header, which includes size information.
     header: Header,
@@ -13,6 +13,39 @@ pub struct Tag {
 }
 
 impl Tag {
+    /// Create a new [`id3v2::Tag`] from the desired pairs of [`AudioTag`]s and [`String`]s
+    /// containing text to be assigned to those [`AudioTag`]s.
+    ///
+    /// [`id3v2::Tag`]: Tag
+    /// [`AudioTag`]: AudioTag
+    /// [`String`]: String
+    pub fn new(info: Vec<(AudioTag, &str)>) -> Tag {
+        let frames: Vec<Frame> = info
+            .into_iter()
+            .map(|(id, text)| Frame::new(id, text))
+            .collect();
+
+        let size: u32 = frames.iter().map(|f| f.serialized_size()).sum();
+
+        let size_0 = size & 0b_00000000_00000000_00000000_01111111;
+        let size_1 = size & 0b_00000000_00000000_00111111_10000000;
+        let size_2 = size & 0b_00000000_00011111_11000000_00000000;
+        let size_3 = size & 0b_00001111_11100000_00000000_00000000;
+
+        let size = (size_3 << 3) | (size_2 << 2) | (size_1 << 1) | size_0;
+
+        Tag {
+            header: Header {
+                // ID3 version 2.3.0
+                version: 0x_03_00,
+                flags: HeaderFlags(0),
+                size,
+                extended_header: None,
+            },
+            frames,
+        }
+    }
+
     /// Serialize this [`id3v2::Tag`] into bytes as a [`Vec<u8>`].
     ///
     /// [`id3v2::Tag`]: Tag
@@ -30,6 +63,29 @@ impl Tag {
 
         bytes
     }
+}
+
+/// Parses the given [`u8`] [`slice`] into a [`Tag`]. This operation gives [`None`] if an only if
+/// the header failes to parse.
+///
+/// [`u8`]: u8
+/// [`slice`]: std::slice
+/// [`Tag`]: Tag
+/// [`None`]: Option::None
+pub fn parse_tag(bytes: &[u8]) -> Result<(Tag, &[u8]), ParseError> {
+    let (header, remaining_bytes) = Header::from_bytes(bytes)?;
+
+    if remaining_bytes.len() < header.size as usize {
+        return Err(ParseError::NotEnoughBytes);
+    }
+
+    let frames: Vec<Frame> = FrameIter {
+        remaining_bytes: &remaining_bytes[..header.size as usize],
+    }
+    .collect();
+
+    let remaining_bytes = &remaining_bytes[header.size as usize..];
+    Ok((Tag { header, frames }, remaining_bytes))
 }
 
 impl AudioTagged for Tag {
@@ -85,29 +141,6 @@ impl AudioTagged for Tag {
             AudioTag::Year => find_frame(self, ID_YEAR).and_then(|f| f.text()),
         }
     }
-}
-
-/// Parses the given [`u8`] [`slice`] into a [`Tag`]. This operation gives [`None`] if an only if
-/// the header failes to parse.
-///
-/// [`u8`]: u8
-/// [`slice`]: std::slice
-/// [`Tag`]: Tag
-/// [`None`]: Option::None
-pub fn parse_tag(bytes: &[u8]) -> Result<(Tag, &[u8]), ParseError> {
-    let (header, remaining_bytes) = Header::from_bytes(bytes)?;
-
-    if remaining_bytes.len() < header.size as usize {
-        return Err(ParseError::NotEnoughBytes);
-    }
-
-    let frames: Vec<Frame> = FrameIter {
-        remaining_bytes: &remaining_bytes[..header.size as usize],
-    }
-    .collect();
-
-    let remaining_bytes = &remaining_bytes[header.size as usize..];
-    Ok((Tag { header, frames }, remaining_bytes))
 }
 
 /// Errors that may occur when parsing an ID3v2 tag.
@@ -230,6 +263,9 @@ struct Header {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct HeaderFlags(u8);
 
+/// Optional extension to the required [`id3v2::Header`].
+///
+/// [`id3v2::Header`]: Header
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ExtendedHeader {
     /// Total size of the extended header, this is either 6 or 10 bytes, depending on whether CRC
@@ -252,7 +288,7 @@ struct ExtendedHeaderFlags(u16);
 /// have a length equal to the [`FrameHeader`]'s `size` field.
 ///
 /// [`FrameHeader`]: FrameHeader
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Frame {
     /// The [`Frame`]'s header.
     ///
@@ -267,7 +303,7 @@ pub struct Frame {
 }
 
 /// A header for ID3v2 frames.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct FrameHeader {
     /// Frame IDs are made up of the capital letters 'A' through 'Z' as well as the digits '0'
     /// through '9'.
@@ -282,7 +318,7 @@ struct FrameHeader {
 }
 
 /// Flags for ID3v2 frame headers.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct FrameHeaderFlags(u16);
 
 impl Header {
@@ -449,6 +485,61 @@ impl ExtendedHeader {
 }
 
 impl Frame {
+    /// Create a new [`Frame`].
+    ///
+    /// [`Frame`]: Frame
+    fn new(id: AudioTag, text: &str) -> Frame {
+        let mut bytes = vec![0x01];
+        bytes.append(&mut text.bytes().collect());
+
+        let id_bytes = match id {
+            AudioTag::AlbumTitle => ID_ALBUM_TITLE,
+            AudioTag::Bpm => ID_BPM,
+            AudioTag::Composer => ID_COMPOSER,
+            AudioTag::ContentType => ID_CONTENT_TYPE,
+            AudioTag::CopyrightMessage => ID_COPYRIGHT_MESSAGE,
+            AudioTag::Date => ID_DATE,
+            AudioTag::PlaylistDelay => ID_PLAYLIST_DELAY,
+            AudioTag::EncodedBy => ID_ENCODED_BY,
+            AudioTag::Lyricist => ID_LYRICIST,
+            AudioTag::FileType => ID_FILE_TYPE,
+            AudioTag::Time => ID_TIME,
+            AudioTag::ContentGroupDescription => ID_CONTENT_GROUP_DESCRIPTION,
+            AudioTag::Title => ID_TITLE,
+            AudioTag::Subtitle => ID_SUBTITLE,
+            AudioTag::InitialKey => ID_INITIAL_KEY,
+            AudioTag::Language => ID_LANGUAGE,
+            AudioTag::Length => ID_LENGTH,
+            AudioTag::MediaType => ID_MEDIA_TYPE,
+            AudioTag::OriginalAlbum => ID_ORIGINAL_ALBUM,
+            AudioTag::OriginalFilename => ID_ORIGINAL_FILENAME,
+            AudioTag::OrginalArtist => ID_ORGINAL_ARTIST,
+            AudioTag::OriginalReleaseYear => ID_ORIGINAL_RELEASE_YEAR,
+            AudioTag::FileOwner => ID_FILE_OWNER,
+            AudioTag::LeadArtist => ID_LEAD_ARTIST,
+            AudioTag::Band => ID_BAND,
+            AudioTag::Conductor => ID_CONDUCTOR,
+            AudioTag::ModifiedBy => ID_MODIFIED_BY,
+            AudioTag::PartOfSet => ID_PART_OF_SET,
+            AudioTag::Publisher => ID_PUBLISHER,
+            AudioTag::TrackNumber => ID_TRACK_NUMBER,
+            AudioTag::RecordingDate => ID_RECORDING_DATE,
+            AudioTag::InternetRadioStationName => ID_INTERNET_RADIO_STATION_NAME,
+            AudioTag::Size => ID_SIZE,
+            AudioTag::Isrc => ID_ISRC,
+            AudioTag::EncodingSettings => ID_ENCODING_SETTINGS,
+            AudioTag::Year => ID_YEAR,
+        };
+
+        Frame {
+            header: FrameHeader {
+                id: id_bytes,
+                size: bytes.len() as _,
+                flags: FrameHeaderFlags(0),
+            },
+            data: bytes,
+        }
+    }
     /// Parse a [`Frame`] from the given bytes. Returns the parsed [`Frame`] and all unparsed bytes
     /// which follow it.
     ///
@@ -475,6 +566,13 @@ impl Frame {
         bytes.append(&mut self.header.to_bytes());
         bytes.append(&mut self.data);
         bytes
+    }
+
+    /// The size of the [`Frame`] in bytes after serialization.
+    ///
+    /// [`Frame`]: Frame
+    fn serialized_size(&self) -> u32 {
+        10 + self.data.len() as u32
     }
 
     /// Compute the text of a [`Frame`].

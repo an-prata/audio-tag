@@ -3,7 +3,7 @@ use std::mem::{self, transmute};
 
 /// Packed struct for directly transmuting from bytes.
 #[repr(packed)]
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub struct Tag {
     id: [u8; 3],
     title: [u8; 30],

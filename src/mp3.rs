@@ -2,9 +2,18 @@ use crate::{
     audio_info::{AudioTag, AudioTagged},
     id3v1, id3v2,
 };
-use std::{error::Error, fmt::Display, fs, io, ops::Range, path::Path, result};
+use std::{
+    error::Error,
+    fmt::Display,
+    fs,
+    io::{self, Write},
+    ops::Range,
+    path::Path,
+    result,
+};
 
 /// An MP3 file.
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub struct File {
     /// The [`Frame`]s which make up the MP3's sound.
     pub frames: Vec<Frame>,
@@ -18,9 +27,47 @@ pub struct File {
 
 impl File {
     /// Open and parse an MP3 file for reading track info.
-    pub fn open(path: impl AsRef<Path>) -> Result<File> {
+    pub fn read_from(path: impl AsRef<Path>) -> Result<File> {
         let bytes = fs::read(path).map_err(|e| ParseError::Io(e))?;
+        File::from_bytes(&bytes)
+    }
 
+    /// Serialize this [`mp3::File`] into bytes, then write them to a file at the given
+    /// [`AsRef<Path>`].
+    ///
+    /// [`mp3::File`]: File
+    /// [`AsRef<Path>`]: AsRef<Path>
+    pub fn write_to(self, path: impl AsRef<Path>) -> Result<()> {
+        let mut file = fs::File::create(path).map_err(|io_err| ParseError::Io(io_err))?;
+        let bytes = self.to_bytes();
+        file.write_all(&bytes)
+            .map_err(|io_err| ParseError::Io(io_err))?;
+
+        Ok(())
+    }
+
+    /// Serialize this [`mp3::File`] into bytes.
+    ///
+    /// [`mp3::File`]: File
+    fn to_bytes(self) -> Vec<u8> {
+        match self.tag {
+            // ID3v2 is expected to preffix the MP3.
+            Tag::Id3v2(tag) => {
+                let mut bytes: Vec<u8> = tag.to_bytes();
+                bytes.append(&mut self.frames.into_iter().flat_map(|f| f.to_bytes()).collect());
+                bytes
+            }
+
+            Tag::Id3v1(tag) => {
+                let mut bytes: Vec<u8> =
+                    self.frames.into_iter().flat_map(|f| f.to_bytes()).collect();
+                bytes.append(&mut tag.to_bytes().to_vec());
+                bytes
+            }
+        }
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Result<File> {
         match id3v2::parse_tag(&bytes) {
             // Treat the file as having an ID3v2 tag.
             Ok((v2_tag, remaining_bytes)) => {
@@ -65,6 +112,7 @@ impl AudioTagged for File {
 ///
 /// [`id3v1::Tag`]: id3v1::Tag
 /// [`id3v2::Tag`]: id3v2::Tag
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Tag {
     /// ID3 version 2 tag.
     Id3v2(id3v2::Tag),
@@ -83,6 +131,7 @@ impl AudioTagged for Tag {
 }
 
 /// A single MP3 frame.
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Frame {
     /// The [`Frame`]'s header, containing bit rate and sample information among other things.
     ///
@@ -100,6 +149,7 @@ pub struct Frame {
 /// An MP3 frame header. MP3 (MPEG-1 Audio Layer III or MPEG-2 Audio Layer III) does not have file
 /// headers, instead it is made up or largely independant frames, each with their own 32-bit
 /// headers. The frames are not _entirely_ independant in the case of variable bit rate.
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub struct FrameHeader(u32);
 
 impl Frame {
@@ -122,6 +172,16 @@ impl Frame {
         let data = remaining_bytes[..frame_length].to_vec();
         let remaining_bytes = &remaining_bytes[frame_length..];
         Some((Frame { header, data }, remaining_bytes))
+    }
+
+    /// Serialize this [`Frame`] into bytes.
+    ///
+    /// [`Frame`]: Frame
+    fn to_bytes(mut self) -> Vec<u8> {
+        let mut bytes: Vec<u8> = Vec::new();
+        bytes.append(&mut self.header.to_bytes().to_vec());
+        bytes.append(&mut self.data);
+        bytes
     }
 }
 
@@ -272,6 +332,65 @@ const EMPHASIS_MASK: u32 = 0b_00000000_00000000_00000000_00000011;
 const EMPHASIS_SHIFT: u32 = 0;
 
 impl FrameHeader {
+    fn new(
+        version: Version,
+        layer: Layer,
+        bitrate_bits: u8,
+        sample_rate_bits: u8,
+        padded: bool,
+        private: bool,
+        channel_mode: ChannelMode,
+        copyrighted: bool,
+        original: bool,
+    ) -> FrameHeader {
+        let channel_mode_bits: u32 = match channel_mode {
+            ChannelMode::Stereo => 0b0000,
+            ChannelMode::JointStereoL1L2 {
+                intensity_stereo_bands: Range { start: 4, end: 31 },
+            } => 0b0100,
+            ChannelMode::JointStereoL1L2 {
+                intensity_stereo_bands: Range { start: 8, end: 31 },
+            } => 0b0101,
+            ChannelMode::JointStereoL1L2 {
+                intensity_stereo_bands: Range { start: 12, end: 31 },
+            } => 0b0110,
+            ChannelMode::JointStereoL1L2 {
+                intensity_stereo_bands: Range { start: 16, end: 31 },
+            } => 0b0111,
+            ChannelMode::JointStereoL3 {
+                intensity_stereo: true,
+                ms_stereo: true,
+            } => 0b0111,
+            ChannelMode::JointStereoL3 {
+                intensity_stereo: true,
+                ms_stereo: false,
+            } => 0b0101,
+            ChannelMode::JointStereoL3 {
+                intensity_stereo: false,
+                ms_stereo: true,
+            } => 0b0110,
+            ChannelMode::JointStereoL3 {
+                intensity_stereo: false,
+                ms_stereo: false,
+            } => 0b0100,
+            ChannelMode::DualChannel => 0b1000,
+            ChannelMode::SingleChannel => 0b1100,
+            _ => unreachable!(),
+        };
+
+        FrameHeader(
+            0b_11111111_11100000_00000000_00000000
+                | ((version as u32) << 19)
+                | ((layer as u32) << 17)
+                | ((bitrate_bits as u32) << 12)
+                | ((sample_rate_bits as u32) << 10)
+                | ((padded as u32) << 9)
+                | ((private as u32) << 8)
+                | (channel_mode_bits << 4)
+                | ((copyrighted as u32) << 3)
+                | ((original as u32) << 2),
+        )
+    }
     /// Parse a [`FrameHeader`] from the given [`slice`] of bytes. Returns the parsed
     /// [`FrameHeader`] as well as the left over bytes after parsing.
     ///
@@ -290,6 +409,13 @@ impl FrameHeader {
         }
 
         Some((FrameHeader(header), remaining))
+    }
+
+    /// Serialize this [`FrameHeader`] into bytes.
+    ///
+    /// [`FrameHeader`]: FrameHeader
+    fn to_bytes(self) -> [u8; size_of::<FrameHeader>()] {
+        self.0.to_be_bytes()
     }
 
     /// Gives the length of the [`Frame`] in bytes (not the typical 4 byte slots).
@@ -586,5 +712,91 @@ impl FrameHeader {
         } else {
             Some(0)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::audio_info::AudioTag;
+
+    #[test]
+    fn to_bytes() {
+        let header = FrameHeader::new(
+            Version::Mpeg2_5,
+            Layer::LayerIII,
+            0b1110,
+            0b00,
+            false,
+            false,
+            ChannelMode::SingleChannel,
+            false,
+            true,
+        );
+
+        let tag = id3v2::Tag::new(vec![
+            (AudioTag::LeadArtist, "John Doe"),
+            (AudioTag::Title, "Sick Beat"),
+            (AudioTag::AlbumTitle, "John Doe's Mixtape"),
+        ]);
+
+        let mp3 = File {
+            frames: vec![Frame {
+                header,
+                data: vec![0; header.frame_length().unwrap() as usize],
+            }],
+            tag: Tag::Id3v2(tag.clone()),
+        };
+
+        let mut bytes: Vec<u8> = tag.to_bytes();
+        bytes.append(&mut vec![
+            0b_1111_1111,
+            0b_1110_0010,
+            0b_1110_0000,
+            0b_1100_0100,
+        ]);
+        bytes.append(&mut vec![0; header.frame_length().unwrap() as usize]);
+
+        assert_eq!(mp3.to_bytes(), bytes);
+    }
+
+    #[test]
+    fn from_bytes() {
+        let header = FrameHeader::new(
+            Version::Mpeg2_5,
+            Layer::LayerIII,
+            0b1110,
+            0b00,
+            false,
+            false,
+            ChannelMode::SingleChannel,
+            false,
+            true,
+        );
+
+        let tag = id3v2::Tag::new(vec![
+            (AudioTag::LeadArtist, "John Doe"),
+            (AudioTag::Title, "Sick Beat"),
+            (AudioTag::AlbumTitle, "John Doe's Mixtape"),
+        ]);
+
+        let mut bytes: Vec<u8> = tag.clone().to_bytes();
+        bytes.append(&mut vec![
+            0b_1111_1111,
+            0b_1110_0010,
+            0b_1110_0000,
+            0b_1100_0100,
+        ]);
+        bytes.append(&mut vec![0; header.frame_length().unwrap() as usize]);
+
+        let mp3 = File {
+            frames: vec![Frame {
+                header,
+                data: vec![0; header.frame_length().unwrap() as usize],
+            }],
+            tag: Tag::Id3v2(tag),
+        };
+
+        assert_eq!(File::from_bytes(&bytes).unwrap(), mp3);
     }
 }
