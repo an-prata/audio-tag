@@ -2,13 +2,21 @@ use std::fmt::Display;
 
 use crate::audio_info::{AudioTag, AudioTagged};
 
+/// An ID3v2 tag.
 #[derive(Debug, Clone)]
 pub struct Tag {
-    pub header: Header,
-    pub frames: Vec<Frame>,
+    /// The tag's header, which includes size information.
+    header: Header,
+
+    /// The tag's frames, which contains the actual tag information.
+    frames: Vec<Frame>,
 }
 
 impl Tag {
+    /// Serialize this [`id3v2::Tag`] into bytes as a [`Vec<u8>`].
+    ///
+    /// [`id3v2::Tag`]: Tag
+    /// [`Vec<u8>`]: Vec<u8>
     pub fn to_bytes(self) -> Vec<u8> {
         let mut bytes: Vec<u8> = Vec::new();
         bytes.append(&mut self.header.to_bytes());
@@ -21,6 +29,61 @@ impl Tag {
         );
 
         bytes
+    }
+}
+
+impl AudioTagged for Tag {
+    fn get_tag(&self, tag: AudioTag) -> Option<String> {
+        match tag {
+            AudioTag::AlbumTitle => find_frame(self, ID_ALBUM_TITLE).and_then(|f| f.text()),
+            AudioTag::Bpm => find_frame(self, ID_BPM).and_then(|f| f.text()),
+            AudioTag::Composer => find_frame(self, ID_COMPOSER).and_then(|f| f.text()),
+            AudioTag::ContentType => find_frame(self, ID_CONTENT_TYPE).and_then(|f| f.text()),
+            AudioTag::CopyrightMessage => {
+                find_frame(self, ID_COPYRIGHT_MESSAGE).and_then(|f| f.text())
+            }
+            AudioTag::Date => find_frame(self, ID_DATE).and_then(|f| f.text()),
+            AudioTag::PlaylistDelay => find_frame(self, ID_PLAYLIST_DELAY).and_then(|f| f.text()),
+            AudioTag::EncodedBy => find_frame(self, ID_ENCODED_BY).and_then(|f| f.text()),
+            AudioTag::Lyricist => find_frame(self, ID_LYRICIST).and_then(|f| f.text()),
+            AudioTag::FileType => find_frame(self, ID_FILE_TYPE).and_then(|f| f.text()),
+            AudioTag::Time => find_frame(self, ID_TIME).and_then(|f| f.text()),
+            AudioTag::ContentGroupDescription => {
+                find_frame(self, ID_CONTENT_GROUP_DESCRIPTION).and_then(|f| f.text())
+            }
+            AudioTag::Title => find_frame(self, ID_TITLE).and_then(|f| f.text()),
+            AudioTag::Subtitle => find_frame(self, ID_SUBTITLE).and_then(|f| f.text()),
+            AudioTag::InitialKey => find_frame(self, ID_INITIAL_KEY).and_then(|f| f.text()),
+            AudioTag::Language => find_frame(self, ID_LANGUAGE).and_then(|f| f.text()),
+            AudioTag::Length => find_frame(self, ID_LENGTH).and_then(|f| f.text()),
+            AudioTag::MediaType => find_frame(self, ID_MEDIA_TYPE).and_then(|f| f.text()),
+            AudioTag::OriginalAlbum => find_frame(self, ID_ORIGINAL_ALBUM).and_then(|f| f.text()),
+            AudioTag::OriginalFilename => {
+                find_frame(self, ID_ORIGINAL_FILENAME).and_then(|f| f.text())
+            }
+            AudioTag::OrginalArtist => find_frame(self, ID_ORGINAL_ARTIST).and_then(|f| f.text()),
+            AudioTag::OriginalReleaseYear => {
+                find_frame(self, ID_ORIGINAL_RELEASE_YEAR).and_then(|f| f.text())
+            }
+            AudioTag::FileOwner => find_frame(self, ID_FILE_OWNER).and_then(|f| f.text()),
+            AudioTag::LeadArtist => find_frame(self, ID_LEAD_ARTIST).and_then(|f| f.text()),
+            AudioTag::Band => find_frame(self, ID_BAND).and_then(|f| f.text()),
+            AudioTag::Conductor => find_frame(self, ID_CONDUCTOR).and_then(|f| f.text()),
+            AudioTag::ModifiedBy => find_frame(self, ID_MODIFIED_BY).and_then(|f| f.text()),
+            AudioTag::PartOfSet => find_frame(self, ID_PART_OF_SET).and_then(|f| f.text()),
+            AudioTag::Publisher => find_frame(self, ID_PUBLISHER).and_then(|f| f.text()),
+            AudioTag::TrackNumber => find_frame(self, ID_TRACK_NUMBER).and_then(|f| f.text()),
+            AudioTag::RecordingDate => find_frame(self, ID_RECORDING_DATE).and_then(|f| f.text()),
+            AudioTag::InternetRadioStationName => {
+                find_frame(self, ID_INTERNET_RADIO_STATION_NAME).and_then(|f| f.text())
+            }
+            AudioTag::Size => find_frame(self, ID_SIZE).and_then(|f| f.text()),
+            AudioTag::Isrc => find_frame(self, ID_ISRC).and_then(|f| f.text()),
+            AudioTag::EncodingSettings => {
+                find_frame(self, ID_ENCODING_SETTINGS).and_then(|f| f.text())
+            }
+            AudioTag::Year => find_frame(self, ID_YEAR).and_then(|f| f.text()),
+        }
     }
 }
 
@@ -129,61 +192,10 @@ const ID_ISRC: FrameId = *b"TSRC";
 const ID_ENCODING_SETTINGS: FrameId = *b"TSSE";
 const ID_YEAR: FrameId = *b"TYER";
 
-impl AudioTagged for Tag {
-    fn get_tag(&self, tag: AudioTag) -> Option<String> {
-        match tag {
-            AudioTag::AlbumTitle => find_frame(self, ID_ALBUM_TITLE).and_then(|f| f.text()),
-            AudioTag::Bpm => find_frame(self, ID_BPM).and_then(|f| f.text()),
-            AudioTag::Composer => find_frame(self, ID_COMPOSER).and_then(|f| f.text()),
-            AudioTag::ContentType => find_frame(self, ID_CONTENT_TYPE).and_then(|f| f.text()),
-            AudioTag::CopyrightMessage => {
-                find_frame(self, ID_COPYRIGHT_MESSAGE).and_then(|f| f.text())
-            }
-            AudioTag::Date => find_frame(self, ID_DATE).and_then(|f| f.text()),
-            AudioTag::PlaylistDelay => find_frame(self, ID_PLAYLIST_DELAY).and_then(|f| f.text()),
-            AudioTag::EncodedBy => find_frame(self, ID_ENCODED_BY).and_then(|f| f.text()),
-            AudioTag::Lyricist => find_frame(self, ID_LYRICIST).and_then(|f| f.text()),
-            AudioTag::FileType => find_frame(self, ID_FILE_TYPE).and_then(|f| f.text()),
-            AudioTag::Time => find_frame(self, ID_TIME).and_then(|f| f.text()),
-            AudioTag::ContentGroupDescription => {
-                find_frame(self, ID_CONTENT_GROUP_DESCRIPTION).and_then(|f| f.text())
-            }
-            AudioTag::Title => find_frame(self, ID_TITLE).and_then(|f| f.text()),
-            AudioTag::Subtitle => find_frame(self, ID_SUBTITLE).and_then(|f| f.text()),
-            AudioTag::InitialKey => find_frame(self, ID_INITIAL_KEY).and_then(|f| f.text()),
-            AudioTag::Language => find_frame(self, ID_LANGUAGE).and_then(|f| f.text()),
-            AudioTag::Length => find_frame(self, ID_LENGTH).and_then(|f| f.text()),
-            AudioTag::MediaType => find_frame(self, ID_MEDIA_TYPE).and_then(|f| f.text()),
-            AudioTag::OriginalAlbum => find_frame(self, ID_ORIGINAL_ALBUM).and_then(|f| f.text()),
-            AudioTag::OriginalFilename => {
-                find_frame(self, ID_ORIGINAL_FILENAME).and_then(|f| f.text())
-            }
-            AudioTag::OrginalArtist => find_frame(self, ID_ORGINAL_ARTIST).and_then(|f| f.text()),
-            AudioTag::OriginalReleaseYear => {
-                find_frame(self, ID_ORIGINAL_RELEASE_YEAR).and_then(|f| f.text())
-            }
-            AudioTag::FileOwner => find_frame(self, ID_FILE_OWNER).and_then(|f| f.text()),
-            AudioTag::LeadArtist => find_frame(self, ID_LEAD_ARTIST).and_then(|f| f.text()),
-            AudioTag::Band => find_frame(self, ID_BAND).and_then(|f| f.text()),
-            AudioTag::Conductor => find_frame(self, ID_CONDUCTOR).and_then(|f| f.text()),
-            AudioTag::ModifiedBy => find_frame(self, ID_MODIFIED_BY).and_then(|f| f.text()),
-            AudioTag::PartOfSet => find_frame(self, ID_PART_OF_SET).and_then(|f| f.text()),
-            AudioTag::Publisher => find_frame(self, ID_PUBLISHER).and_then(|f| f.text()),
-            AudioTag::TrackNumber => find_frame(self, ID_TRACK_NUMBER).and_then(|f| f.text()),
-            AudioTag::RecordingDate => find_frame(self, ID_RECORDING_DATE).and_then(|f| f.text()),
-            AudioTag::InternetRadioStationName => {
-                find_frame(self, ID_INTERNET_RADIO_STATION_NAME).and_then(|f| f.text())
-            }
-            AudioTag::Size => find_frame(self, ID_SIZE).and_then(|f| f.text()),
-            AudioTag::Isrc => find_frame(self, ID_ISRC).and_then(|f| f.text()),
-            AudioTag::EncodingSettings => {
-                find_frame(self, ID_ENCODING_SETTINGS).and_then(|f| f.text())
-            }
-            AudioTag::Year => find_frame(self, ID_YEAR).and_then(|f| f.text()),
-        }
-    }
-}
-
+/// An [`Iterator`] over ID3v2 [`Frame`]s.
+///
+/// [`Iterator`]: Iterator
+/// [`Frame`]: Frame
 #[derive(Debug, Clone, Copy)]
 struct FrameIter<'d> {
     remaining_bytes: &'d [u8],
@@ -199,8 +211,9 @@ impl<'d> Iterator for FrameIter<'d> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct Header {
+/// ID3v2 header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Header {
     version: u16,
     flags: HeaderFlags,
 
@@ -213,13 +226,15 @@ pub struct Header {
     extended_header: Option<ExtendedHeader>,
 }
 
-#[derive(Debug, Clone, Copy)]
+/// Flags from an ID3v2 header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct HeaderFlags(u8);
 
-#[derive(Debug, Clone, Copy)]
-pub struct ExtendedHeader {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ExtendedHeader {
     /// Total size of the extended header, this is either 6 or 10 bytes, depending on whether CRC
-    /// data is present.
+    /// data is present. This value excludes itself, meaning that the actual size of the extended
+    /// header is this value plus 4.
     extended_header_size: u32,
 
     extended_flags: ExtendedHeaderFlags,
@@ -229,7 +244,8 @@ pub struct ExtendedHeader {
     total_frame_crc: Option<u32>,
 }
 
-#[derive(Debug, Clone, Copy)]
+/// Flags from an ID3v2 extended header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ExtendedHeaderFlags(u16);
 
 /// A frame with a [`FrameHeader`], and unparsed data thereafter. The included `data` field will
@@ -250,6 +266,7 @@ pub struct Frame {
     data: Vec<u8>,
 }
 
+/// A header for ID3v2 frames.
 #[derive(Debug, Clone, Copy)]
 struct FrameHeader {
     /// Frame IDs are made up of the capital letters 'A' through 'Z' as well as the digits '0'
@@ -264,11 +281,16 @@ struct FrameHeader {
     flags: FrameHeaderFlags,
 }
 
+/// Flags for ID3v2 frame headers.
 #[derive(Debug, Clone, Copy)]
 struct FrameHeaderFlags(u16);
 
 impl Header {
-    fn from_bytes(bytes: &[u8]) -> Result<(Self, &[u8]), ParseError> {
+    /// Parse a [`Header`] from the given bytes. Returns a [`Header`] and the remaining, unparsed
+    /// bytes which come after.
+    ///
+    /// [`Header`]: Header
+    fn from_bytes(bytes: &[u8]) -> Result<(Header, &[u8]), ParseError> {
         if bytes.len() < 10 {
             return Err(ParseError::NotEnoughBytes);
         }
@@ -332,8 +354,11 @@ impl Header {
         }
     }
 
+    /// Serialize this [`Header`] into bytes.
+    ///
+    /// [`Header`]: Header
     fn to_bytes(self) -> Vec<u8> {
-        let mut bytes: Vec<u8> = Vec::new();
+        let mut bytes: Vec<u8> = vec![b'I', b'D', b'3'];
         bytes.append(&mut self.version.to_be_bytes().into());
         bytes.append(&mut self.flags.0.to_be_bytes().into());
         bytes.append(&mut self.size.to_be_bytes().into());
@@ -347,7 +372,11 @@ impl Header {
 }
 
 impl ExtendedHeader {
-    fn from_bytes(bytes: &[u8]) -> Result<(Self, &[u8]), ParseError> {
+    /// Parse an [`ExtendedHeader`] from the given slice of bytes. Returns the parsed
+    /// [`ExtendedHeader`] and all remaining unparsed bytes after it.
+    ///
+    /// [`ExtendedHeader`]: ExtendedHeader
+    fn from_bytes(bytes: &[u8]) -> Result<(ExtendedHeader, &[u8]), ParseError> {
         if bytes.len() < 10 {
             return Err(ParseError::NotEnoughBytes);
         }
@@ -401,6 +430,10 @@ impl ExtendedHeader {
         }
     }
 
+    /// Serialize the [`ExtendedHeader`] into bytes in a [`Vec<u8>`].
+    ///
+    /// [`ExtendedHeader`]: ExtendedHeader
+    /// [`Vec<u8>`]: Vec<u8>
     fn to_bytes(self) -> Vec<u8> {
         let mut bytes: Vec<u8> = Vec::new();
         bytes.append(&mut self.extended_header_size.to_be_bytes().into());
@@ -416,7 +449,11 @@ impl ExtendedHeader {
 }
 
 impl Frame {
-    fn from_bytes(bytes: &[u8]) -> Option<(Self, &[u8])> {
+    /// Parse a [`Frame`] from the given bytes. Returns the parsed [`Frame`] and all unparsed bytes
+    /// which follow it.
+    ///
+    /// [`Frame`]: Frame
+    fn from_bytes(bytes: &[u8]) -> Option<(Frame, &[u8])> {
         let (header, bytes) = FrameHeader::from_bytes(bytes)?;
 
         // ID3v2 requires that a frame be at least one byte, excluding its header, therefor `size`
@@ -429,6 +466,10 @@ impl Frame {
         Some((Frame { header, data }, &bytes[header.size as usize..]))
     }
 
+    /// Serialize the [`Frame`] into bytes as a [`Vec<u8>`].
+    ///
+    /// [`Frame`]: Frame
+    /// [`Vec<u8>`]: Vec<u8>
     fn to_bytes(mut self) -> Vec<u8> {
         let mut bytes: Vec<u8> = Vec::new();
         bytes.append(&mut self.header.to_bytes());
@@ -478,7 +519,11 @@ impl Frame {
 }
 
 impl FrameHeader {
-    fn from_bytes(bytes: &[u8]) -> Option<(Self, &[u8])> {
+    /// Parse a [`FrameHeader`] from the given bytes. Returning the [`FrameHeader`] and all unparsed
+    /// bytes which follow it.
+    ///
+    /// [`FrameHeader`]: FrameHeader
+    fn from_bytes(bytes: &[u8]) -> Option<(FrameHeader, &[u8])> {
         if bytes.len() < 10 {
             return None;
         }
@@ -502,6 +547,10 @@ impl FrameHeader {
         ))
     }
 
+    /// Serialize the [`FrameHeader`] into bytes as a [`Vec<u8>`].
+    ///
+    /// [`FrameHeader`]: FrameHeader
+    /// [`Vec<u8>`]: Vec<u8>
     fn to_bytes(self) -> Vec<u8> {
         let mut bytes: Vec<u8> = Vec::new();
         bytes.append(&mut self.id.into());
@@ -554,5 +603,234 @@ impl FrameHeaderFlags {
 
     fn contains_group_information(self) -> bool {
         self.0 & 0b_0000_0000_0010_0000 > 0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::id3v2::ExtendedHeader;
+    use crate::id3v2::ExtendedHeaderFlags;
+
+    use super::Header;
+    use super::HeaderFlags;
+
+    #[test]
+    #[rustfmt::skip]
+    fn header_to_bytes() {
+        let header = Header {
+            version: 2,
+            flags: HeaderFlags(0b_0000_0000),
+            size: 0b_00001000_00100000_00000001_00000010,
+            extended_header: None,
+        };
+
+        let bytes = header.to_bytes();
+
+        assert_eq!(
+            bytes,
+            vec![
+                // ID
+                b'I', b'D', b'3', 
+
+                // version
+                0, 2,
+
+                // flags
+                0,
+
+                // size
+                0b00001000, 0b00100000, 0b00000001, 0b00000010
+            ]
+        );
+
+        let header = Header {
+            version: 2,
+            flags: HeaderFlags(0b_0100_0000),
+            size: 0b_00001000_00100000_00000001_00000010,
+            extended_header: Some(ExtendedHeader {
+                extended_header_size: 6,
+                extended_flags: ExtendedHeaderFlags(0b_01010000_11110000),
+                size_of_padding: 0,
+                total_frame_crc: None,
+            }),
+        };
+
+        let bytes = header.to_bytes();
+
+        assert_eq!(
+            bytes,
+            vec![
+                // ID
+                b'I', b'D', b'3', 
+
+                // version
+                0, 2,
+
+                // flags
+                0b_0100_0000,
+
+                // size
+                0b00001000,0b00100000, 0b00000001, 0b00000010,
+
+                // extended header size
+                0, 0, 0, 6,
+
+                // extended header flags
+                0b01010000, 0b11110000,
+
+                // size of padding
+                0, 0, 0, 0
+            ]
+        );
+
+        let header = Header {
+            version: 2,
+            flags: HeaderFlags(0b_0100_0000),
+            size: 0b_00001000_00100000_00000001_00000010,
+            extended_header: Some(ExtendedHeader {
+                extended_header_size: 10,
+                extended_flags: ExtendedHeaderFlags(0b_01010000_11110000),
+                size_of_padding: 0,
+                total_frame_crc: Some(0b_00001111_00110011_01010101_11110000),
+            }),
+        };
+
+        let bytes = header.to_bytes();
+
+        assert_eq!(
+            bytes,
+            vec![
+                // ID
+                b'I', b'D', b'3', 
+
+                // version
+                0, 2,
+
+                // flags
+                0b_0100_0000,
+
+                // size
+                0b00001000,0b00100000, 0b00000001, 0b00000010,
+
+                // extended header size
+                0, 0, 0, 10,
+
+                // extended header flags
+                0b01010000, 0b11110000,
+
+                // size of padding
+                0, 0, 0, 0,
+
+                // crc
+                0b00001111, 0b00110011, 0b01010101, 0b11110000,
+            ]
+        );
+    }
+
+    #[test]
+    #[rustfmt::skip]
+    fn header_from_bytes() {
+        let bytes = [
+            // ID
+            b'I', b'D', b'3', 
+
+            // version
+            0, 2,
+
+            // flags
+            0,
+
+            // size
+            0, 0, 0, 0
+        ];
+
+        let header = Header {
+            version: 2,
+            flags: HeaderFlags(0b_0000_0000),
+            size: 0,
+            extended_header: None,
+        };
+
+
+        assert_eq!(Header::from_bytes(&bytes).map(|tuple| tuple.0), Ok(header));
+
+        let bytes = [
+            // ID
+            b'I', b'D', b'3', 
+
+            // version
+            0, 2,
+
+            // flags
+            0b_0100_0000,
+
+            // size
+            0b00001000, 0b00100000, 0b00000001, 0b00000010,
+
+            // extended header size
+            0, 0, 0, 6,
+
+            // extended header flags
+            0b01010000, 0b11110000,
+
+            // size of padding
+            0, 0, 0, 0
+        ];
+
+        let header = Header {
+            version: 2,
+            flags: HeaderFlags(0b_0100_0000),
+            size: 0b_00000001_00001000_00000000_10000010,
+            extended_header: Some(ExtendedHeader {
+                extended_header_size: 6,
+                extended_flags: ExtendedHeaderFlags(0b_01010000_11110000),
+                size_of_padding: 0,
+                total_frame_crc: None,
+            }),
+        };
+
+
+        assert_eq!(Header::from_bytes(&bytes).map(|tuple| tuple.0), Ok(header));
+
+        let bytes = [
+            // ID
+            b'I', b'D', b'3', 
+
+            // version
+            0, 2,
+
+            // flags
+            0b_0100_0000,
+
+            // size
+            0, 0, 0, 14,
+
+            // extended header size
+            0, 0, 0, 10,
+
+            // extended header flags
+            0b10000000, 0b00000000,
+
+            // size of padding
+            0, 0, 0, 0,
+
+            // crc
+            0b00001111, 0b00110011, 0b01010101, 0b11110000,
+        ];
+
+        let header = Header {
+            version: 2,
+            flags: HeaderFlags(0b_0100_0000),
+            size: 14,
+            extended_header: Some(ExtendedHeader {
+                extended_header_size: 10,
+                extended_flags: ExtendedHeaderFlags(0b_10000000_00000000),
+                size_of_padding: 0,
+                total_frame_crc: Some(0b_00001111_00110011_01010101_11110000),
+            }),
+        };
+
+
+        assert_eq!(Header::from_bytes(&bytes).map(|tuple| tuple.0), Ok(header));
     }
 }
