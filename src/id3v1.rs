@@ -1,5 +1,5 @@
 use crate::audio_info::{AudioTag, AudioTagged};
-use std::mem;
+use std::mem::{self, transmute};
 
 /// Packed struct for directly transmuting from bytes.
 #[repr(packed)]
@@ -36,6 +36,13 @@ impl Tag {
             Tag::from_bytes_exact(*bytes[..size_of::<Tag>()].as_array()?),
             &bytes[size_of::<Tag>()..],
         ))
+    }
+
+    /// Serialize the [`id3v1::Tag`] into bytes.
+    ///
+    /// [`id3v1::Tag`]: Tag
+    pub fn to_bytes(self) -> [u8; size_of::<Tag>()] {
+        unsafe { transmute(self) }
     }
 
     /// Creates a [`Tag`] from an exact number of bytes.
