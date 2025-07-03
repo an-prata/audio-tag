@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::audio_info::{AudioTag, AudioTagged};
+use crate::audio_info::{self, Tagged};
 
 /// An ID3v2 tag.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,39 +13,6 @@ pub struct Tag {
 }
 
 impl Tag {
-    /// Create a new [`id3v2::Tag`] from the desired pairs of [`AudioTag`]s and [`String`]s
-    /// containing text to be assigned to those [`AudioTag`]s.
-    ///
-    /// [`id3v2::Tag`]: Tag
-    /// [`AudioTag`]: AudioTag
-    /// [`String`]: String
-    pub fn new(info: Vec<(AudioTag, &str)>) -> Tag {
-        let frames: Vec<Frame> = info
-            .into_iter()
-            .map(|(id, text)| Frame::new(id, text))
-            .collect();
-
-        let size: u32 = frames.iter().map(|f| f.serialized_size()).sum();
-
-        let size_0 = size & 0b_00000000_00000000_00000000_01111111;
-        let size_1 = size & 0b_00000000_00000000_00111111_10000000;
-        let size_2 = size & 0b_00000000_00011111_11000000_00000000;
-        let size_3 = size & 0b_00001111_11100000_00000000_00000000;
-
-        let size = (size_3 << 3) | (size_2 << 2) | (size_1 << 1) | size_0;
-
-        Tag {
-            header: Header {
-                // ID3 version 2.3.0
-                version: 0x_03_00,
-                flags: HeaderFlags(0),
-                size,
-                extended_header: None,
-            },
-            frames,
-        }
-    }
-
     /// Serialize this [`id3v2::Tag`] into bytes as a [`Vec<u8>`].
     ///
     /// [`id3v2::Tag`]: Tag
@@ -88,58 +55,159 @@ pub fn parse_tag(bytes: &[u8]) -> Result<(Tag, &[u8]), ParseError> {
     Ok((Tag { header, frames }, remaining_bytes))
 }
 
-impl AudioTagged for Tag {
-    fn get_tag(&self, tag: AudioTag) -> Option<String> {
-        match tag {
-            AudioTag::AlbumTitle => find_frame(self, ID_ALBUM_TITLE).and_then(|f| f.text()),
-            AudioTag::Bpm => find_frame(self, ID_BPM).and_then(|f| f.text()),
-            AudioTag::Composer => find_frame(self, ID_COMPOSER).and_then(|f| f.text()),
-            AudioTag::ContentType => find_frame(self, ID_CONTENT_TYPE).and_then(|f| f.text()),
-            AudioTag::CopyrightMessage => {
-                find_frame(self, ID_COPYRIGHT_MESSAGE).and_then(|f| f.text())
-            }
-            AudioTag::Date => find_frame(self, ID_DATE).and_then(|f| f.text()),
-            AudioTag::PlaylistDelay => find_frame(self, ID_PLAYLIST_DELAY).and_then(|f| f.text()),
-            AudioTag::EncodedBy => find_frame(self, ID_ENCODED_BY).and_then(|f| f.text()),
-            AudioTag::Lyricist => find_frame(self, ID_LYRICIST).and_then(|f| f.text()),
-            AudioTag::FileType => find_frame(self, ID_FILE_TYPE).and_then(|f| f.text()),
-            AudioTag::Time => find_frame(self, ID_TIME).and_then(|f| f.text()),
-            AudioTag::ContentGroupDescription => {
-                find_frame(self, ID_CONTENT_GROUP_DESCRIPTION).and_then(|f| f.text())
-            }
-            AudioTag::Title => find_frame(self, ID_TITLE).and_then(|f| f.text()),
-            AudioTag::Subtitle => find_frame(self, ID_SUBTITLE).and_then(|f| f.text()),
-            AudioTag::InitialKey => find_frame(self, ID_INITIAL_KEY).and_then(|f| f.text()),
-            AudioTag::Language => find_frame(self, ID_LANGUAGE).and_then(|f| f.text()),
-            AudioTag::Length => find_frame(self, ID_LENGTH).and_then(|f| f.text()),
-            AudioTag::MediaType => find_frame(self, ID_MEDIA_TYPE).and_then(|f| f.text()),
-            AudioTag::OriginalAlbum => find_frame(self, ID_ORIGINAL_ALBUM).and_then(|f| f.text()),
-            AudioTag::OriginalFilename => {
-                find_frame(self, ID_ORIGINAL_FILENAME).and_then(|f| f.text())
-            }
-            AudioTag::OrginalArtist => find_frame(self, ID_ORGINAL_ARTIST).and_then(|f| f.text()),
-            AudioTag::OriginalReleaseYear => {
-                find_frame(self, ID_ORIGINAL_RELEASE_YEAR).and_then(|f| f.text())
-            }
-            AudioTag::FileOwner => find_frame(self, ID_FILE_OWNER).and_then(|f| f.text()),
-            AudioTag::LeadArtist => find_frame(self, ID_LEAD_ARTIST).and_then(|f| f.text()),
-            AudioTag::Band => find_frame(self, ID_BAND).and_then(|f| f.text()),
-            AudioTag::Conductor => find_frame(self, ID_CONDUCTOR).and_then(|f| f.text()),
-            AudioTag::ModifiedBy => find_frame(self, ID_MODIFIED_BY).and_then(|f| f.text()),
-            AudioTag::PartOfSet => find_frame(self, ID_PART_OF_SET).and_then(|f| f.text()),
-            AudioTag::Publisher => find_frame(self, ID_PUBLISHER).and_then(|f| f.text()),
-            AudioTag::TrackNumber => find_frame(self, ID_TRACK_NUMBER).and_then(|f| f.text()),
-            AudioTag::RecordingDate => find_frame(self, ID_RECORDING_DATE).and_then(|f| f.text()),
-            AudioTag::InternetRadioStationName => {
-                find_frame(self, ID_INTERNET_RADIO_STATION_NAME).and_then(|f| f.text())
-            }
-            AudioTag::Size => find_frame(self, ID_SIZE).and_then(|f| f.text()),
-            AudioTag::Isrc => find_frame(self, ID_ISRC).and_then(|f| f.text()),
-            AudioTag::EncodingSettings => {
-                find_frame(self, ID_ENCODING_SETTINGS).and_then(|f| f.text())
-            }
-            AudioTag::Year => find_frame(self, ID_YEAR).and_then(|f| f.text()),
-        }
+impl Tagged for Tag {
+    fn album_title(&self) -> Option<String> {
+        find_frame(self, ID_ALBUM_TITLE).and_then(|f| f.text())
+    }
+
+    fn bpm(&self) -> Option<f64> {
+        find_frame(self, ID_BPM)
+            .and_then(|f| f.text())
+            .and_then(|s| s.parse::<f64>().ok())
+    }
+
+    fn composer(&self) -> Option<String> {
+        find_frame(self, ID_COMPOSER).and_then(|f| f.text())
+    }
+
+    fn content_type(&self) -> Option<String> {
+        find_frame(self, ID_CONTENT_TYPE).and_then(|f| f.text())
+    }
+
+    fn copyright_message(&self) -> Option<String> {
+        find_frame(self, ID_COPYRIGHT_MESSAGE).and_then(|f| f.text())
+    }
+
+    fn date(&self) -> Option<String> {
+        find_frame(self, ID_DATE).and_then(|f| f.text())
+    }
+
+    fn playlist_delay(&self) -> Option<String> {
+        find_frame(self, ID_PLAYLIST_DELAY).and_then(|f| f.text())
+    }
+
+    fn encoded_by(&self) -> Option<String> {
+        find_frame(self, ID_ENCODED_BY).and_then(|f| f.text())
+    }
+
+    fn lyricist(&self) -> Option<String> {
+        find_frame(self, ID_LYRICIST).and_then(|f| f.text())
+    }
+
+    fn file_type(&self) -> Option<String> {
+        find_frame(self, ID_FILE_TYPE).and_then(|f| f.text())
+    }
+
+    fn time(&self) -> Option<String> {
+        find_frame(self, ID_TIME).and_then(|f| f.text())
+    }
+
+    fn content_group_description(&self) -> Option<String> {
+        find_frame(self, ID_CONTENT_GROUP_DESCRIPTION).and_then(|f| f.text())
+    }
+
+    fn title(&self) -> Option<String> {
+        find_frame(self, ID_TITLE).and_then(|f| f.text())
+    }
+
+    fn subtitle(&self) -> Option<String> {
+        find_frame(self, ID_SUBTITLE).and_then(|f| f.text())
+    }
+
+    fn initial_key(&self) -> Option<audio_info::Key> {
+        find_frame(self, ID_INITIAL_KEY)
+            .and_then(|f| f.text())
+            .and_then(|t| audio_info::Key::parse_key(&t))
+    }
+
+    fn language(&self) -> Option<String> {
+        find_frame(self, ID_LANGUAGE).and_then(|f| f.text())
+    }
+
+    fn length(&self) -> Option<String> {
+        find_frame(self, ID_LENGTH).and_then(|f| f.text())
+    }
+
+    fn media_type(&self) -> Option<String> {
+        find_frame(self, ID_MEDIA_TYPE).and_then(|f| f.text())
+    }
+
+    fn original_album(&self) -> Option<String> {
+        find_frame(self, ID_ORIGINAL_ALBUM).and_then(|f| f.text())
+    }
+
+    fn original_filename(&self) -> Option<String> {
+        find_frame(self, ID_ORIGINAL_FILENAME).and_then(|f| f.text())
+    }
+
+    fn original_artist(&self) -> Option<String> {
+        find_frame(self, ID_ORIGINAL_ARTIST).and_then(|f| f.text())
+    }
+
+    fn original_release_year(&self) -> Option<u32> {
+        find_frame(self, ID_ORIGINAL_RELEASE_YEAR)
+            .and_then(|f| f.text())
+            .and_then(|s| s.parse::<u32>().ok())
+    }
+
+    fn file_owner(&self) -> Option<String> {
+        find_frame(self, ID_FILE_OWNER).and_then(|f| f.text())
+    }
+
+    fn lead_artist(&self) -> Option<String> {
+        find_frame(self, ID_LEAD_ARTIST).and_then(|f| f.text())
+    }
+
+    fn band(&self) -> Option<String> {
+        find_frame(self, ID_BAND).and_then(|f| f.text())
+    }
+
+    fn conductor(&self) -> Option<String> {
+        find_frame(self, ID_CONDUCTOR).and_then(|f| f.text())
+    }
+
+    fn modified_by(&self) -> Option<String> {
+        find_frame(self, ID_MODIFIED_BY).and_then(|f| f.text())
+    }
+
+    fn part_of_set(&self) -> Option<String> {
+        find_frame(self, ID_PART_OF_SET).and_then(|f| f.text())
+    }
+
+    fn publisher(&self) -> Option<String> {
+        find_frame(self, ID_PUBLISHER).and_then(|f| f.text())
+    }
+
+    fn track_number(&self) -> Option<u32> {
+        find_frame(self, ID_TRACK_NUMBER)
+            .and_then(|f| f.text())
+            .and_then(|s| s.parse::<u32>().ok())
+    }
+
+    fn recording_date(&self) -> Option<String> {
+        find_frame(self, ID_RECORDING_DATE).and_then(|f| f.text())
+    }
+
+    fn internet_radio_station(&self) -> Option<String> {
+        find_frame(self, ID_INTERNET_RADIO_STATION_NAME).and_then(|f| f.text())
+    }
+
+    fn size(&self) -> Option<String> {
+        find_frame(self, ID_SIZE).and_then(|f| f.text())
+    }
+
+    fn isrc(&self) -> Option<String> {
+        find_frame(self, ID_ISRC).and_then(|f| f.text())
+    }
+
+    fn encoding_settings(&self) -> Option<String> {
+        find_frame(self, ID_ENCODING_SETTINGS).and_then(|f| f.text())
+    }
+
+    fn year(&self) -> Option<u32> {
+        find_frame(self, ID_YEAR)
+            .and_then(|f| f.text())
+            .and_then(|s| s.parse::<u32>().ok())
     }
 }
 
@@ -208,7 +276,7 @@ const ID_LENGTH: FrameId = *b"TLEN";
 const ID_MEDIA_TYPE: FrameId = *b"TMED";
 const ID_ORIGINAL_ALBUM: FrameId = *b"TOAL";
 const ID_ORIGINAL_FILENAME: FrameId = *b"TOLY";
-const ID_ORGINAL_ARTIST: FrameId = *b"TOPE";
+const ID_ORIGINAL_ARTIST: FrameId = *b"TOPE";
 const ID_ORIGINAL_RELEASE_YEAR: FrameId = *b"TORY";
 const ID_FILE_OWNER: FrameId = *b"TOWN";
 const ID_LEAD_ARTIST: FrameId = *b"TPE1";
@@ -485,61 +553,6 @@ impl ExtendedHeader {
 }
 
 impl Frame {
-    /// Create a new [`Frame`].
-    ///
-    /// [`Frame`]: Frame
-    fn new(id: AudioTag, text: &str) -> Frame {
-        let mut bytes = vec![0x01];
-        bytes.append(&mut text.bytes().collect());
-
-        let id_bytes = match id {
-            AudioTag::AlbumTitle => ID_ALBUM_TITLE,
-            AudioTag::Bpm => ID_BPM,
-            AudioTag::Composer => ID_COMPOSER,
-            AudioTag::ContentType => ID_CONTENT_TYPE,
-            AudioTag::CopyrightMessage => ID_COPYRIGHT_MESSAGE,
-            AudioTag::Date => ID_DATE,
-            AudioTag::PlaylistDelay => ID_PLAYLIST_DELAY,
-            AudioTag::EncodedBy => ID_ENCODED_BY,
-            AudioTag::Lyricist => ID_LYRICIST,
-            AudioTag::FileType => ID_FILE_TYPE,
-            AudioTag::Time => ID_TIME,
-            AudioTag::ContentGroupDescription => ID_CONTENT_GROUP_DESCRIPTION,
-            AudioTag::Title => ID_TITLE,
-            AudioTag::Subtitle => ID_SUBTITLE,
-            AudioTag::InitialKey => ID_INITIAL_KEY,
-            AudioTag::Language => ID_LANGUAGE,
-            AudioTag::Length => ID_LENGTH,
-            AudioTag::MediaType => ID_MEDIA_TYPE,
-            AudioTag::OriginalAlbum => ID_ORIGINAL_ALBUM,
-            AudioTag::OriginalFilename => ID_ORIGINAL_FILENAME,
-            AudioTag::OrginalArtist => ID_ORGINAL_ARTIST,
-            AudioTag::OriginalReleaseYear => ID_ORIGINAL_RELEASE_YEAR,
-            AudioTag::FileOwner => ID_FILE_OWNER,
-            AudioTag::LeadArtist => ID_LEAD_ARTIST,
-            AudioTag::Band => ID_BAND,
-            AudioTag::Conductor => ID_CONDUCTOR,
-            AudioTag::ModifiedBy => ID_MODIFIED_BY,
-            AudioTag::PartOfSet => ID_PART_OF_SET,
-            AudioTag::Publisher => ID_PUBLISHER,
-            AudioTag::TrackNumber => ID_TRACK_NUMBER,
-            AudioTag::RecordingDate => ID_RECORDING_DATE,
-            AudioTag::InternetRadioStationName => ID_INTERNET_RADIO_STATION_NAME,
-            AudioTag::Size => ID_SIZE,
-            AudioTag::Isrc => ID_ISRC,
-            AudioTag::EncodingSettings => ID_ENCODING_SETTINGS,
-            AudioTag::Year => ID_YEAR,
-        };
-
-        Frame {
-            header: FrameHeader {
-                id: id_bytes,
-                size: bytes.len() as _,
-                flags: FrameHeaderFlags(0),
-            },
-            data: bytes,
-        }
-    }
     /// Parse a [`Frame`] from the given bytes. Returns the parsed [`Frame`] and all unparsed bytes
     /// which follow it.
     ///

@@ -1,7 +1,4 @@
-use crate::{
-    audio_info::{Audio, AudioTag, AudioTagged},
-    id3v2,
-};
+use crate::{audio_info::Audio, id3v2};
 use extended::Extended;
 use std::{
     error::Error,
@@ -74,6 +71,17 @@ impl File {
             })
             .unwrap()
     }
+
+    /// Find the [`Id3v2Chunk`] and return the [`id3v2::Tag`] that it contains if successful.
+    ///
+    /// [`Id3v2Chunk`]: Id3v2Chunk
+    /// [`id3v2::Tag`]: id3v2::Tag
+    fn tag(&self) -> Option<&id3v2::Tag> {
+        self.form_aiff.chunks.iter().find_map(|chunk| match chunk {
+            Chunk::Id3v2(tag_chunk) => Some(&tag_chunk.tag),
+            _ => None,
+        })
+    }
 }
 
 impl Audio for File {
@@ -87,41 +95,6 @@ impl Audio for File {
 
     fn channels(&self) -> u16 {
         self.common_chunk().channels as _
-    }
-}
-
-impl AudioTagged for File {
-    fn get_tag(&self, audio_tag: AudioTag) -> Option<String> {
-        self.form_aiff
-            .chunks
-            .iter()
-            .find_map(|c| match c {
-                Chunk::Id3v2(Id3v2Chunk { tag }) => tag.get_tag(audio_tag),
-                _ => None,
-            })
-            .or_else(|| match audio_tag {
-                AudioTag::LeadArtist => self.form_aiff.chunks.iter().find_map(|c| match c {
-                    Chunk::Author(author_chunk) => {
-                        String::from_utf8(author_chunk.text.to_owned()).ok()
-                    }
-
-                    _ => None,
-                }),
-
-                AudioTag::Title => self.form_aiff.chunks.iter().find_map(|c| match c {
-                    Chunk::Name(name_chunk) => String::from_utf8(name_chunk.text.to_owned()).ok(),
-                    _ => None,
-                }),
-
-                AudioTag::CopyrightMessage => self.form_aiff.chunks.iter().find_map(|c| match c {
-                    Chunk::Copyright(copyright_chunk) => {
-                        String::from_utf8(copyright_chunk.text.to_owned()).ok()
-                    }
-                    _ => None,
-                }),
-
-                _ => None,
-            })
     }
 }
 
@@ -1239,7 +1212,7 @@ mod tests {
 
         assert_eq!(&chunk.id, b"FORM");
         assert_eq!(chunk.data.len(), 4);
-        assert_eq!(chunk.data, b"AIFF" as &[u8]);
+        assert_eq!(&chunk.data, b"AIFF");
 
         assert_eq!(remainder, &[1, 2, 3, 4]);
     }

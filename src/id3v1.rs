@@ -1,4 +1,4 @@
-use crate::audio_info::{AudioTag, AudioTagged};
+use crate::audio_info::Tagged;
 use std::mem::{self, transmute};
 
 /// Packed struct for directly transmuting from bytes.
@@ -55,15 +55,149 @@ impl Tag {
     }
 }
 
-impl AudioTagged for Tag {
-    fn get_tag(&self, audio_tag: AudioTag) -> Option<String> {
-        match audio_tag {
-            AudioTag::AlbumTitle => String::from_utf8(self.album.to_vec()).ok(),
-            AudioTag::Title => String::from_utf8(self.title.to_vec()).ok(),
-            AudioTag::LeadArtist => String::from_utf8(self.artist.to_vec()).ok(),
-            AudioTag::Year => String::from_utf8(self.year.to_vec()).ok(),
-            _ => None,
-        }
+impl Tagged for Tag {
+    fn album_title(&self) -> Option<String> {
+        String::from_utf8(self.album.to_vec()).ok()
+    }
+
+    fn bpm(&self) -> Option<f64> {
+        None
+    }
+
+    fn composer(&self) -> Option<String> {
+        None
+    }
+
+    fn content_type(&self) -> Option<String> {
+        None
+    }
+
+    fn copyright_message(&self) -> Option<String> {
+        None
+    }
+
+    fn date(&self) -> Option<String> {
+        None
+    }
+
+    fn playlist_delay(&self) -> Option<String> {
+        None
+    }
+
+    fn encoded_by(&self) -> Option<String> {
+        None
+    }
+
+    fn lyricist(&self) -> Option<String> {
+        None
+    }
+
+    fn file_type(&self) -> Option<String> {
+        None
+    }
+
+    fn time(&self) -> Option<String> {
+        None
+    }
+
+    fn content_group_description(&self) -> Option<String> {
+        None
+    }
+
+    fn title(&self) -> Option<String> {
+        String::from_utf8(self.title.to_vec()).ok()
+    }
+
+    fn subtitle(&self) -> Option<String> {
+        None
+    }
+
+    fn initial_key(&self) -> Option<crate::audio_info::Key> {
+        None
+    }
+
+    fn language(&self) -> Option<String> {
+        None
+    }
+
+    fn length(&self) -> Option<String> {
+        None
+    }
+
+    fn media_type(&self) -> Option<String> {
+        None
+    }
+
+    fn original_album(&self) -> Option<String> {
+        None
+    }
+
+    fn original_filename(&self) -> Option<String> {
+        None
+    }
+
+    fn original_artist(&self) -> Option<String> {
+        None
+    }
+
+    fn original_release_year(&self) -> Option<u32> {
+        None
+    }
+
+    fn file_owner(&self) -> Option<String> {
+        None
+    }
+
+    fn lead_artist(&self) -> Option<String> {
+        None
+    }
+
+    fn band(&self) -> Option<String> {
+        None
+    }
+
+    fn conductor(&self) -> Option<String> {
+        None
+    }
+
+    fn modified_by(&self) -> Option<String> {
+        None
+    }
+
+    fn part_of_set(&self) -> Option<String> {
+        None
+    }
+
+    fn publisher(&self) -> Option<String> {
+        None
+    }
+
+    fn track_number(&self) -> Option<u32> {
+        None
+    }
+
+    fn recording_date(&self) -> Option<String> {
+        None
+    }
+
+    fn internet_radio_station(&self) -> Option<String> {
+        None
+    }
+
+    fn size(&self) -> Option<String> {
+        None
+    }
+
+    fn isrc(&self) -> Option<String> {
+        None
+    }
+
+    fn encoding_settings(&self) -> Option<String> {
+        None
+    }
+
+    fn year(&self) -> Option<u32> {
+        None
     }
 }
 
