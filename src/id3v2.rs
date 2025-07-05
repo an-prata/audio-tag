@@ -1,6 +1,5 @@
-use std::fmt::Display;
-
 use crate::audio_info::{self, ReadTag, TrackNumber, WriteTag, WriteTagError};
+use std::fmt::Display;
 
 /// An ID3v2 tag.
 #[derive(Debug, Clone, PartialEq, Eq)]
