@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::audio_info::{self, Tagged};
+use crate::audio_info::{self, ReadTag, TrackNumber, WriteTag, WriteTagError};
 
 /// An ID3v2 tag.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +30,52 @@ impl Tag {
 
         bytes
     }
+
+    /// Write a text frame to the [`id3v2::Tag`]. Creates a [`Frame`] if one does not exist with the
+    /// given [`FrameId`], and removes all [`Frame`]s of the given [`FrameId`] if given `text` is
+    /// [`None`].
+    ///
+    /// [`id3v2::Tag`]: Tag
+    /// [`Frame`]: Frame
+    /// [`FrameId`]: FrameId
+    /// [`None`]: None
+    fn write_text_frame(
+        &mut self,
+        frame_id: FrameId,
+        text: Option<String>,
+    ) -> Result<(), WriteTagError> {
+        let value = match text {
+            Some(v) => v,
+            None => {
+                for i in (0..self.frames.len()).rev() {
+                    if self.frames[i].header.id == frame_id {
+                        self.frames.remove(i);
+                    }
+                }
+
+                return Ok(());
+            }
+        };
+
+        match find_frame_mut(self, frame_id) {
+            Some(frame) => frame.set_text(value),
+            None => {
+                let mut frame = Frame {
+                    header: FrameHeader {
+                        id: frame_id,
+                        size: 0,
+                        flags: FrameHeaderFlags(0),
+                    },
+                    data: Vec::new(),
+                };
+
+                frame.set_text(value);
+                self.frames.push(frame);
+            }
+        }
+
+        Ok(())
+    }
 }
 
 /// Parses the given [`u8`] [`slice`] into a [`Tag`]. This operation gives [`None`] if an only if
@@ -55,7 +101,7 @@ pub fn parse_tag(bytes: &[u8]) -> Result<(Tag, &[u8]), ParseError> {
     Ok((Tag { header, frames }, remaining_bytes))
 }
 
-impl Tagged for Tag {
+impl ReadTag for Tag {
     fn album_title(&self) -> Option<String> {
         find_frame(self, ID_ALBUM_TITLE).and_then(|f| f.text())
     }
@@ -178,10 +224,23 @@ impl Tagged for Tag {
         find_frame(self, ID_PUBLISHER).and_then(|f| f.text())
     }
 
-    fn track_number(&self) -> Option<u32> {
-        find_frame(self, ID_TRACK_NUMBER)
-            .and_then(|f| f.text())
-            .and_then(|s| s.parse::<u32>().ok())
+    fn track_number(&self) -> Option<TrackNumber> {
+        let text = find_frame(self, ID_TRACK_NUMBER).and_then(|f| f.text())?;
+
+        if text.contains('/') {
+            let split: Vec<&str> = text.split('/').collect();
+            let [track, of] = split.as_array()?;
+
+            Some(TrackNumber {
+                track: track.parse().ok()?,
+                of: Some(of.parse().ok()?),
+            })
+        } else {
+            Some(TrackNumber {
+                track: text.parse::<u32>().ok()?,
+                of: None,
+            })
+        }
     }
 
     fn recording_date(&self) -> Option<String> {
@@ -208,6 +267,156 @@ impl Tagged for Tag {
         find_frame(self, ID_YEAR)
             .and_then(|f| f.text())
             .and_then(|s| s.parse::<u32>().ok())
+    }
+}
+
+impl WriteTag for Tag {
+    fn write_album_title(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_ALBUM_TITLE, value)
+    }
+
+    fn write_bpm(&mut self, value: Option<f64>) -> Result<(), WriteTagError> {
+        // BPM is an integer to ID3v2 - we enforce that here
+        self.write_text_frame(ID_BPM, value.map(|bpm| (bpm as u64).to_string()))
+    }
+
+    fn write_composer(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_COMPOSER, value)
+    }
+
+    fn write_content_type(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_CONTENT_TYPE, value)
+    }
+
+    fn write_copyright_message(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_COPYRIGHT_MESSAGE, value)
+    }
+
+    fn write_date(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_DATE, value)
+    }
+
+    fn write_playlist_delay(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_PLAYLIST_DELAY, value)
+    }
+
+    fn write_encoded_by(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_ENCODED_BY, value)
+    }
+
+    fn write_lyricist(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_LYRICIST, value)
+    }
+
+    fn write_file_type(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_FILE_TYPE, value)
+    }
+
+    fn write_time(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_TIME, value)
+    }
+
+    fn write_content_group_description(
+        &mut self,
+        value: Option<String>,
+    ) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_CONTENT_GROUP_DESCRIPTION, value)
+    }
+
+    fn write_title(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_TITLE, value)
+    }
+
+    fn write_subtitle(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_SUBTITLE, value)
+    }
+
+    fn write_initial_key(&mut self, value: Option<audio_info::Key>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_INITIAL_KEY, value.map(|k| k.to_string()))
+    }
+
+    fn write_language(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_LANGUAGE, value)
+    }
+
+    fn write_length(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_LENGTH, value)
+    }
+
+    fn write_media_type(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_MEDIA_TYPE, value)
+    }
+
+    fn write_original_album(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_ORIGINAL_ALBUM, value)
+    }
+
+    fn write_original_filename(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_ORIGINAL_FILENAME, value)
+    }
+
+    fn write_original_artist(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_ORIGINAL_ARTIST, value)
+    }
+
+    fn write_original_release_year(&mut self, value: Option<u32>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_ORIGINAL_RELEASE_YEAR, value.map(|y| y.to_string()))
+    }
+
+    fn write_file_owner(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_FILE_OWNER, value)
+    }
+
+    fn write_lead_artist(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_LEAD_ARTIST, value)
+    }
+
+    fn write_band(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_BAND, value)
+    }
+
+    fn write_conductor(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_CONDUCTOR, value)
+    }
+
+    fn write_modified_by(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_MODIFIED_BY, value)
+    }
+
+    fn write_part_of_set(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_PART_OF_SET, value)
+    }
+
+    fn write_publisher(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_PUBLISHER, value)
+    }
+
+    fn write_track_number(&mut self, value: Option<TrackNumber>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_TRACK_NUMBER, value.map(|t| t.to_string()))
+    }
+
+    fn write_recording_date(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_RECORDING_DATE, value)
+    }
+
+    fn write_internet_radio_station(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_INTERNET_RADIO_STATION_NAME, value)
+    }
+
+    fn write_size(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_SIZE, value)
+    }
+
+    fn write_isrc(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_ISRC, value)
+    }
+
+    fn write_encoding_settings(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_ENCODING_SETTINGS, value)
+    }
+
+    fn write_year(&mut self, value: Option<u32>) -> Result<(), WriteTagError> {
+        self.write_text_frame(ID_YEAR, value.map(|y| y.to_string()))
     }
 }
 
@@ -251,6 +460,16 @@ impl Display for ParseError {
 /// [`Tag`]: Tag
 fn find_frame(tag: &Tag, id: FrameId) -> Option<&Frame> {
     tag.frames.iter().find(|f| f.header.id == id)
+}
+
+/// Finds a [`Frame`] with the given [`FrameId`] within an ID3v2 [`Tag`], and returns a mutable
+/// reference to it.
+///
+/// [`Frame`]: Frame
+/// [`FrameId`]: FrameId
+/// [`Tag`]: Tag
+fn find_frame_mut(tag: &mut Tag, id: FrameId) -> Option<&mut Frame> {
+    tag.frames.iter_mut().find(|f| f.header.id == id)
 }
 
 /// Type alias for frame IDs, which are four bytes meant to be interpreted as text.
@@ -626,6 +845,17 @@ impl Frame {
 
             _ => return None,
         }
+    }
+
+    /// Replace the text in the given [`Frame`] with the given [`String`]. This will set the
+    /// [`Frame`] to use UTF-16 encoding with big endian ordering.
+    ///
+    /// [`Frame`]: Frame
+    /// [`String`]: String
+    fn set_text(&mut self, text: String) {
+        let mut data: Vec<u8> = vec![0x01, 0xFE, 0xFF]; // indicates utf16
+        data.append(&mut text.encode_utf16().flat_map(|c| c.to_be_bytes()).collect());
+        self.header.size = self.data.len() as _;
     }
 }
 

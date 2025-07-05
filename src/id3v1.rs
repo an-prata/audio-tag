@@ -1,5 +1,8 @@
-use crate::audio_info::Tagged;
-use std::mem::{self, transmute};
+use crate::audio_info::{Key, ReadTag, TrackNumber, WriteTag, WriteTagError};
+use std::{
+    ascii,
+    mem::{self, transmute},
+};
 
 /// Packed struct for directly transmuting from bytes.
 #[repr(packed)]
@@ -55,7 +58,7 @@ impl Tag {
     }
 }
 
-impl Tagged for Tag {
+impl ReadTag for Tag {
     fn album_title(&self) -> Option<String> {
         String::from_utf8(self.album.to_vec()).ok()
     }
@@ -112,7 +115,7 @@ impl Tagged for Tag {
         None
     }
 
-    fn initial_key(&self) -> Option<crate::audio_info::Key> {
+    fn initial_key(&self) -> Option<Key> {
         None
     }
 
@@ -149,7 +152,7 @@ impl Tagged for Tag {
     }
 
     fn lead_artist(&self) -> Option<String> {
-        None
+        String::from_utf8(self.artist.to_vec()).ok()
     }
 
     fn band(&self) -> Option<String> {
@@ -172,7 +175,7 @@ impl Tagged for Tag {
         None
     }
 
-    fn track_number(&self) -> Option<u32> {
+    fn track_number(&self) -> Option<TrackNumber> {
         None
     }
 
@@ -198,6 +201,240 @@ impl Tagged for Tag {
 
     fn year(&self) -> Option<u32> {
         None
+    }
+}
+
+impl WriteTag for Tag {
+    fn write_album_title(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        let album = match value {
+            Some(a) => a,
+            None => return Err(WriteTagError::InvalidValue),
+        };
+
+        let bytes: Vec<u8> = album
+            .chars()
+            .filter_map(|c| c.as_ascii().map(|ac: ascii::Char| ac.to_u8()))
+            .collect();
+
+        if bytes.len() > self.album.len() {
+            return Err(WriteTagError::ValueTooLarge);
+        }
+
+        self.album = [0; _];
+
+        for i in 0..bytes.len() {
+            self.album[i] = bytes[i];
+        }
+
+        Ok(())
+    }
+
+    fn write_bpm(&mut self, _value: Option<f64>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_composer(&mut self, _value: Option<String>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_content_type(&mut self, _value: Option<String>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_copyright_message(&mut self, _value: Option<String>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_date(&mut self, _value: Option<String>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_playlist_delay(&mut self, _value: Option<String>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_encoded_by(&mut self, _value: Option<String>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_lyricist(&mut self, _value: Option<String>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_file_type(&mut self, _value: Option<String>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_time(&mut self, _value: Option<String>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_content_group_description(
+        &mut self,
+        _value: Option<String>,
+    ) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_title(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        let title = match value {
+            Some(t) => t,
+            None => return Err(WriteTagError::InvalidValue),
+        };
+
+        let bytes: Vec<u8> = title
+            .chars()
+            .filter_map(|c| c.as_ascii().map(|ac: ascii::Char| ac.to_u8()))
+            .collect();
+
+        if bytes.len() > self.title.len() {
+            return Err(WriteTagError::ValueTooLarge);
+        }
+
+        self.title = [0; _];
+
+        for i in 0..bytes.len() {
+            self.title[i] = bytes[i];
+        }
+
+        Ok(())
+    }
+
+    fn write_subtitle(&mut self, _value: Option<String>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_initial_key(&mut self, _value: Option<Key>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_language(&mut self, _value: Option<String>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_length(&mut self, _value: Option<String>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_media_type(&mut self, _value: Option<String>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_original_album(&mut self, _value: Option<String>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_original_filename(&mut self, _value: Option<String>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_original_artist(&mut self, _value: Option<String>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_original_release_year(&mut self, _value: Option<u32>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_file_owner(&mut self, _value: Option<String>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_lead_artist(&mut self, value: Option<String>) -> Result<(), WriteTagError> {
+        let artist = match value {
+            Some(a) => a,
+            None => return Err(WriteTagError::InvalidValue),
+        };
+
+        let bytes: Vec<u8> = artist
+            .chars()
+            .filter_map(|c| c.as_ascii().map(|ac: ascii::Char| ac.to_u8()))
+            .collect();
+
+        if bytes.len() > self.artist.len() {
+            return Err(WriteTagError::ValueTooLarge);
+        }
+
+        self.artist = [0; _];
+
+        for i in 0..bytes.len() {
+            self.artist[i] = bytes[i];
+        }
+
+        Ok(())
+    }
+
+    fn write_band(&mut self, _value: Option<String>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_conductor(&mut self, _value: Option<String>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_modified_by(&mut self, _value: Option<String>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_part_of_set(&mut self, _value: Option<String>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_publisher(&mut self, _value: Option<String>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_track_number(&mut self, _value: Option<TrackNumber>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_recording_date(&mut self, _value: Option<String>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_internet_radio_station(
+        &mut self,
+        _value: Option<String>,
+    ) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_size(&mut self, _value: Option<String>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_isrc(&mut self, _value: Option<String>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_encoding_settings(&mut self, _value: Option<String>) -> Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_year(&mut self, value: Option<u32>) -> Result<(), WriteTagError> {
+        let year = match value {
+            Some(y) => y,
+            None => return Err(WriteTagError::InvalidValue),
+        };
+
+        let text: String = year.to_string();
+
+        if text.chars().any(|c| !c.is_ascii_digit()) {
+            return Err(WriteTagError::InvalidValue);
+        }
+
+        let mut bytes: Vec<u8> = text
+            .chars()
+            .map(|c| c.as_ascii().map(|ac| ac.to_u8()))
+            .try_collect()
+            .ok_or(WriteTagError::InvalidValue)?;
+
+        while bytes.len() < 4 {
+            bytes.insert(0, b'0');
+        }
+
+        self.year = *bytes.as_array().ok_or(WriteTagError::ValueTooLarge)?;
+        Ok(())
     }
 }
 
