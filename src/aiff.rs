@@ -1236,7 +1236,8 @@ mod tests {
     #[test]
     #[rustfmt::skip]
     fn common_chunk() {
-        let bytes = [
+        let sample_rate = Extended::from(44_000_f64);
+        let mut bytes = vec![
             // ID
             b'C', b'O', b'M', b'M',
 
@@ -1251,10 +1252,8 @@ mod tests {
 
             // Sample size
             0, 32,
-
-            // Sample rate (just nonsense for now)
-            9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
         ];
+        bytes.append(&mut sample_rate.to_be_bytes().to_vec());
 
         let (chunk, _) = TypelessChunk::from_bytes(&bytes).unwrap();
         let typed_chunk= chunk.typed().unwrap();
@@ -1264,6 +1263,8 @@ mod tests {
                 assert_eq!(common_chunk.channels, 2);
                 assert_eq!(common_chunk.num_sample_frames, u32::MAX);
                 assert_eq!(common_chunk.sample_size, 32);
+                assert_eq!(common_chunk.sample_rate, sample_rate);
+                assert_eq!(common_chunk.sample_rate.to_f64(), 44_000_f64);
             },
 
             _ => panic!("Expected chunk to be a common chunk"),
