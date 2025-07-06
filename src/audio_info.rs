@@ -152,6 +152,7 @@ impl Display for TrackNumber {
 /// expression with sharps come first:
 ///
 /// ```
+/// use audio_tag::audio_info::Key;
 /// assert!(Key::B < Key::CFlat);
 /// ```
 ///
