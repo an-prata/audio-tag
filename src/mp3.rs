@@ -1,4 +1,7 @@
-use crate::{id3v1, id3v2};
+use crate::{
+    audio_info::{self, ReadTag, WriteTag},
+    id3v1, id3v2,
+};
 use std::{
     error::Error,
     fmt::Display,
@@ -21,6 +24,9 @@ pub struct File {
     /// [`id3v2::Tag`]: id3v2::Tag
     pub tag: Tag,
 }
+
+audio_info::impl_read_tag!(File, File::tag);
+audio_info::impl_write_tag!(File, File::tag_mut);
 
 impl File {
     /// Open and parse an MP3 file for reading track info.
@@ -100,6 +106,20 @@ impl File {
             }
         }
     }
+
+    /// Gets a [`ReadTag`], meant for implementing [`ReadTag`] with macros.
+    ///
+    /// [`ReadTag`]: ReadTag
+    fn tag(&self) -> Option<&dyn ReadTag> {
+        Some(self.tag.tag())
+    }
+
+    /// Gets a [`WriteTag`], meant for implementing [`WriteTag`] with macros.
+    ///
+    /// [`WriteTag`]: WriteTag
+    fn tag_mut(&mut self) -> Option<&mut dyn WriteTag> {
+        Some(self.tag.tag_mut())
+    }
 }
 
 /// An ID3 tag, either [`id3v1::Tag`] or [`id3v2::Tag`]>
@@ -113,6 +133,28 @@ pub enum Tag {
 
     /// ID3 version 1 tag.
     Id3v1(id3v1::Tag),
+}
+
+impl Tag {
+    /// Get a reference to a [`ReadTag`] instance.
+    ///
+    /// [`ReadTag`]: ReadTag
+    fn tag(&self) -> &dyn ReadTag {
+        match self {
+            Tag::Id3v1(tag) => tag,
+            Tag::Id3v2(tag) => tag,
+        }
+    }
+
+    /// Get a mutable reference to a [`WriteTag`] instance.
+    ///
+    /// [`WriteTag`]: WriteTag
+    fn tag_mut(&mut self) -> &mut dyn WriteTag {
+        match self {
+            Tag::Id3v1(tag) => tag,
+            Tag::Id3v2(tag) => tag,
+        }
+    }
 }
 
 /// A single MP3 frame.

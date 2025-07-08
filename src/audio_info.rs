@@ -1,5 +1,362 @@
 use std::{fmt::Display, io};
 
+/// Implements [`ReadTag`] for a given type using a given function to get an
+/// [`Option<impl ReadTag>`] when given `self.
+///
+/// [`ReadTag`]: ReadTag
+/// [`Option<impl ReadTag>`]: Option<impl ReadTag>
+#[rustfmt::skip]
+#[macro_export]
+macro_rules! impl_read_tag {
+    ($t:ty, $tag:expr) => {
+        impl $crate::audio_info::ReadTag for $t {
+            fn album_title(&self) -> Option<String> { ($tag(self)).and_then(|t| t.album_title()) }
+            fn bpm(&self) -> Option<f64> { ($tag(self)).and_then(|t| t.bpm()) }
+            fn composer(&self) -> Option<String> { ($tag(self)).and_then(|t| t.composer()) }
+            fn content_type(&self) -> Option<String> { ($tag(self)).and_then(|t| t.content_type()) }
+            fn copyright_message(&self) -> Option<String> { ($tag(self)).and_then(|t| t.copyright_message()) }
+            fn date(&self) -> Option<String> { ($tag(self)).and_then(|t| t.date()) }
+            fn playlist_delay(&self) -> Option<String> { ($tag(self)).and_then(|t| t.playlist_delay()) }
+            fn encoded_by(&self) -> Option<String> { ($tag(self)).and_then(|t| t.encoded_by()) }
+            fn lyricist(&self) -> Option<String> { ($tag(self)).and_then(|t| t.lyricist()) }
+            fn file_type(&self) -> Option<String> { ($tag(self)).and_then(|t| t.file_type()) }
+            fn time(&self) -> Option<String> { ($tag(self)).and_then(|t| t.time()) }
+            fn content_group_description(&self) -> Option<String> { ($tag(self)).and_then(|t| t.content_group_description()) }
+            fn title(&self) -> Option<String> { ($tag(self)).and_then(|t| t.title()) }
+            fn subtitle(&self) -> Option<String> { ($tag(self)).and_then(|t| t.subtitle()) }
+            fn initial_key(&self) -> Option<crate::audio_info::Key> { ($tag(self)).and_then(|t| t.initial_key()) }
+            fn language(&self) -> Option<String> { ($tag(self)).and_then(|t| t.language()) }
+            fn length(&self) -> Option<String> { ($tag(self)).and_then(|t| t.length()) }
+            fn media_type(&self) -> Option<String> { ($tag(self)).and_then(|t| t.media_type()) }
+            fn original_album(&self) -> Option<String> { ($tag(self)).and_then(|t| t.original_album()) }
+            fn original_filename(&self) -> Option<String> { ($tag(self)).and_then(|t| t.original_filename()) }
+            fn original_artist(&self) -> Option<String> { ($tag(self)).and_then(|t| t.original_artist()) }
+            fn original_release_year(&self) -> Option<u32> { ($tag(self)).and_then(|t| t.original_release_year()) }
+            fn file_owner(&self) -> Option<String> { ($tag(self)).and_then(|t| t.file_owner()) }
+            fn lead_artist(&self) -> Option<String> { ($tag(self)).and_then(|t| t.lead_artist()) }
+            fn band(&self) -> Option<String> { ($tag(self)).and_then(|t| t.band()) }
+            fn conductor(&self) -> Option<String> { ($tag(self)).and_then(|t| t.conductor()) }
+            fn modified_by(&self) -> Option<String> { ($tag(self)).and_then(|t| t.modified_by()) }
+            fn part_of_set(&self) -> Option<String> { ($tag(self)).and_then(|t| t.part_of_set()) }
+            fn publisher(&self) -> Option<String> { ($tag(self)).and_then(|t| t.publisher()) }
+            fn track_number(&self) -> Option<$crate::audio_info::TrackNumber> { $tag(self).and_then(|t| t.track_number()) }
+            fn recording_date(&self) -> Option<String> { ($tag(self)).and_then(|t| t.recording_date()) }
+            fn internet_radio_station(&self) -> Option<String> { ($tag(self)).and_then(|t| t.internet_radio_station()) }
+            fn size(&self) -> Option<String> { ($tag(self)).and_then(|t| t.size()) }
+            fn isrc(&self) -> Option<String> { ($tag(self)).and_then(|t| t.isrc()) }
+            fn encoding_settings(&self) -> Option<String> { ($tag(self)).and_then(|t| t.encoding_settings()) }
+            fn year(&self) -> Option<u32> { ($tag(self)).and_then(|t| t.year()) }
+        }
+    };
+}
+
+/// Implements [`WriteTag`] for a given type using a given function to get an
+/// [`Option<impl WriteTag>`] when given `self`.
+///
+/// [`ReadTag`]: ReadTag
+/// [`Option<impl ReadTag>`]: Option<impl ReadTag>
+#[rustfmt::skip]
+#[macro_export]
+macro_rules! impl_write_tag {
+    ($t:ty, $tag:expr) => {
+        impl $crate::audio_info::WriteTag for $t {
+            fn write_album_title(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_album_title(value)
+            }
+
+            fn write_bpm(
+                &mut self
+                , value: Option<f64>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_bpm(value)
+            }
+
+            fn write_composer(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_composer(value)
+            }
+
+            fn write_content_type(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_content_type(value)
+            }
+
+            fn write_copyright_message(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_copyright_message(value)
+            }
+
+            fn write_date(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_date(value)
+            }
+
+            fn write_playlist_delay(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_playlist_delay(value)
+            }
+
+            fn write_encoded_by(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_encoded_by(value)
+            }
+
+            fn write_lyricist(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_lyricist(value)
+            }
+
+            fn write_file_type(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_file_type(value)
+            }
+
+            fn write_time(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_time(value)
+            }
+
+            fn write_content_group_description(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_content_group_description(value)
+            }
+
+            fn write_title(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_title(value)
+            }
+
+            fn write_subtitle(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_subtitle(value)
+            }
+
+            fn write_initial_key(
+                &mut self
+                , value: Option<crate::audio_info::Key>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_initial_key(value)
+            }
+
+            fn write_language(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_language(value)
+            }
+
+            fn write_length(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_length(value)
+            }
+
+            fn write_media_type(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_media_type(value)
+            }
+
+            fn write_original_album(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_original_album(value)
+            }
+
+            fn write_original_filename(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_original_filename(value)
+            }
+
+            fn write_original_artist(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_original_artist(value)
+            }
+
+            fn write_original_release_year(
+                &mut self
+                , value: Option<u32>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_original_release_year(value)
+            }
+
+            fn write_file_owner(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_file_owner(value)
+            }
+
+            fn write_lead_artist(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_lead_artist(value)
+            }
+
+            fn write_band(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_band(value)
+            }
+
+            fn write_conductor(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_conductor(value)
+            }
+
+            fn write_modified_by(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_modified_by(value)
+            }
+
+            fn write_part_of_set(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_part_of_set(value)
+            }
+
+            fn write_publisher(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_publisher(value)
+            }
+
+            fn write_track_number(
+                &mut self
+                , value: Option<$crate::audio_info::TrackNumber>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = $tag(self).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_track_number(value)
+            }
+
+            fn write_recording_date(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_recording_date(value)
+            }
+
+            fn write_internet_radio_station(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_internet_radio_station(value)
+            }
+
+            fn write_size(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_size(value)
+            }
+
+            fn write_isrc(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_isrc(value)
+            }
+
+            fn write_encoding_settings(
+                &mut self
+                , value: Option<String>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_encoding_settings(value)
+            }
+
+            fn write_year(
+                &mut self
+                , value: Option<u32>
+            ) -> std::result::Result<(), $crate::audio_info::WriteTagError> {
+                let tag = ($tag(self)).ok_or($crate::audio_info::WriteTagError::NoTag)?;
+                tag.write_year(value)
+            }
+
+        }
+
+    };
+
+}
+
+pub(crate) use impl_read_tag;
+pub(crate) use impl_write_tag;
+
 /// A trait for types which contain audio, and can give information about the audio and how it was
 /// recorded/sampled.
 pub trait Audio {
@@ -103,6 +460,9 @@ pub trait WriteTag {
 /// [`WriteTag`]: WriteTag
 #[derive(Debug)]
 pub enum WriteTagError {
+    /// Tag was not present.
+    NoTag,
+
     /// The field is not supported by the [`WriteTag`] instance.
     ///
     /// [`WriteTag`]: WriteTag

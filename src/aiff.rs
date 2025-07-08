@@ -1,4 +1,7 @@
-use crate::{audio_info::Audio, id3v2};
+use crate::{
+    audio_info::{self, Audio},
+    id3v2,
+};
 use extended::Extended;
 use std::{
     error::Error,
@@ -19,6 +22,9 @@ pub struct File {
     /// [`FormChunk`]: FormChunk
     form_aiff: FormChunk,
 }
+
+audio_info::impl_read_tag!(File, File::tag);
+audio_info::impl_write_tag!(File, File::tag_mut);
 
 impl File {
     /// Open and parse an AIFF (FORM AIFF) file.
@@ -81,6 +87,21 @@ impl File {
             Chunk::Id3v2(tag_chunk) => Some(&tag_chunk.tag),
             _ => None,
         })
+    }
+
+    /// Find the [`Id3v2Chunk`] and return a mutable reference to the [`id3v2::Tag`] that it
+    /// contains if successful.
+    ///
+    /// [`Id3v2Chunk`]: Id3v2Chunk
+    /// [`id3v2::Tag`]: id3v2::Tag
+    fn tag_mut(&mut self) -> Option<&mut id3v2::Tag> {
+        self.form_aiff
+            .chunks
+            .iter_mut()
+            .find_map(|chunk| match chunk {
+                Chunk::Id3v2(tag_chunk) => Some(&mut tag_chunk.tag),
+                _ => None,
+            })
     }
 }
 
