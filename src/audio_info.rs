@@ -1,4 +1,5 @@
-use std::{fmt::Display, io};
+use crate::{aiff, mp3};
+use std::{fmt::Display, io, path::Path};
 
 /// Implements [`ReadTag`] for a given type using a given function to get an
 /// [`Option<impl ReadTag>`] when given `self.
@@ -354,6 +355,127 @@ macro_rules! impl_write_tag {
 pub(crate) use impl_read_tag;
 pub(crate) use impl_write_tag;
 
+/// A wrapper over multiple types of audio file. All variants are instances of [`Audio`], as well as
+/// [`ReadTag`] and [`WriteTag`], making this a common interface for reading and modifying tag
+/// information in audio files.
+///
+/// For access to functionality only available in one kind of audio file the enum must be matched on
+/// for the particular variant associated with that type of audio file.
+///
+/// [`Audio`]: Audio
+/// [`ReadTag`]: ReadTag
+/// [`WriteTag`]: WriteTag
+#[derive(Clone, Debug)]
+pub enum AudioFile {
+    /// An AIFF file, as represented by the [`aiff::File`] type.
+    ///
+    /// [`aiff::File`]: aiff::File
+    Aiff(aiff::File),
+
+    /// An MP3 file, as represented by the [`mp3::File`] type.
+    ///
+    /// [`mp3::File`]: mp3::File
+    Mp3(mp3::File),
+}
+
+impl_read_tag!(AudioFile, AudioFile::tag);
+impl_write_tag!(AudioFile, AudioFile::tag_mut);
+
+impl AudioFile {
+    /// Attempt to open an audio file from the given [`AsRef<Path>`], first by trying to open it as
+    /// the file type associated with its file extension, and upon failure attempting to open the
+    /// file as any and all supported file types.
+    ///
+    /// [`AsRef<Path>`]: AsRef<Path>
+    pub fn open(path: impl AsRef<Path>) -> Result<AudioFile, AudioFileError> {
+        AudioFile::read_from_as_extension(&path).or(AudioFile::read_from_as_any(&path))
+    }
+
+    /// Attempt to read an audio file from the given [`AsRef<Path>`] by attempting to open it as
+    /// each supported type until one succeeds, or all attempts fail.
+    ///
+    /// [`AsRef<Path>`]: AsRef<Path>
+    pub fn read_from_as_any(path: impl AsRef<Path>) -> Result<AudioFile, AudioFileError> {
+        if let Ok(aiff) = aiff::File::read_from(&path) {
+            return Ok(AudioFile::Aiff(aiff));
+        }
+
+        if let Ok(mp3) = mp3::File::read_from(&path) {
+            return Ok(AudioFile::Mp3(mp3));
+        }
+
+        Err(AudioFileError::NoSuchFileType)
+    }
+
+    /// Attempt to read an audio file from the given [`AsRef<Path>`], assuming that the file is the
+    /// type matching its file extension. This function will only attempt to open the file as though
+    /// it is its extension's associated type, and upon failure to parse it as such a file returns
+    /// an error.
+    ///
+    /// [`AsRef<Path>`]: AsRef<Path>
+    pub fn read_from_as_extension(path: impl AsRef<Path>) -> Result<AudioFile, AudioFileError> {
+        match path.as_ref().extension().and_then(|os_str| os_str.to_str()) {
+            Some("aiff") => {
+                let aiff_file = aiff::File::read_from(path)?;
+                Ok(AudioFile::Aiff(aiff_file))
+            }
+
+            Some("mp3") => {
+                let mp3_file = mp3::File::read_from(path)?;
+                Ok(AudioFile::Mp3(mp3_file))
+            }
+
+            _ => Err(AudioFileError::NoSuchFileType),
+        }
+    }
+
+    /// Get a dynamic reference to a [`ReadTag`] instance contained within the given [`AudioFile`].
+    ///
+    /// [`ReadTag`]: ReadTag
+    /// [`AudioFile`]: AudioFile
+    fn tag(&self) -> Option<&dyn ReadTag> {
+        match self {
+            AudioFile::Aiff(file) => Some(file),
+            AudioFile::Mp3(file) => Some(file),
+        }
+    }
+
+    /// Get a mutable dynamic reference to a [`WriteTag`] instance contained within the given
+    /// [`AudioFile`].
+    ///
+    /// [`WriteTag`]: WriteTag
+    /// [`AudioFile`]: AudioFile
+    fn tag_mut(&mut self) -> Option<&mut dyn WriteTag> {
+        match self {
+            AudioFile::Aiff(file) => Some(file),
+            AudioFile::Mp3(file) => Some(file),
+        }
+    }
+}
+
+impl Audio for AudioFile {
+    fn sample_rate(&self) -> f64 {
+        match self {
+            AudioFile::Aiff(file) => file.sample_rate(),
+            AudioFile::Mp3(file) => file.sample_rate(),
+        }
+    }
+
+    fn sample_size(&self) -> u16 {
+        match self {
+            AudioFile::Aiff(file) => file.sample_size(),
+            AudioFile::Mp3(file) => file.sample_size(),
+        }
+    }
+
+    fn channels(&self) -> u16 {
+        match self {
+            AudioFile::Aiff(file) => file.channels(),
+            AudioFile::Mp3(file) => file.channels(),
+        }
+    }
+}
+
 /// A trait for types which contain audio, and can give information about the audio and how it was
 /// recorded/sampled.
 pub trait Audio {
@@ -674,6 +796,39 @@ impl Key {
             "G#m" => Some(Key::GSharpMinor),
             "o" => Some(Key::OffKey),
             _ => None,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum AudioFileError {
+    AiffParseError(aiff::ParseError),
+    Mp3ParseError(mp3::ParseError),
+    Io(io::Error),
+    NoSuchFileType,
+}
+
+impl From<aiff::ParseError> for AudioFileError {
+    fn from(value: aiff::ParseError) -> Self {
+        AudioFileError::AiffParseError(value)
+    }
+}
+
+impl From<mp3::ParseError> for AudioFileError {
+    fn from(value: mp3::ParseError) -> Self {
+        AudioFileError::Mp3ParseError(value)
+    }
+}
+
+impl Display for AudioFileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AudioFileError::AiffParseError(error) => write!(f, "Audio File Error: {}", error),
+            AudioFileError::Mp3ParseError(error) => write!(f, "Audio File Error: {}", error),
+            AudioFileError::Io(error) => write!(f, "Audio File Error: {}", error),
+            AudioFileError::NoSuchFileType => {
+                write!(f, "Audio File Error: No matching audio file type")
+            }
         }
     }
 }
