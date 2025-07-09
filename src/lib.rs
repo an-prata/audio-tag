@@ -3,6 +3,7 @@
 #![feature(ascii_char_variants)]
 #![feature(iter_map_windows)]
 #![feature(iterator_try_collect)]
+#![feature(iterator_try_reduce)]
 #![feature(new_range_api)]
 
 pub mod aiff;

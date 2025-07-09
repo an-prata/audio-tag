@@ -1,5 +1,5 @@
 use crate::{
-    audio_info::{self, ReadTag, WriteTag},
+    audio_info::{self, Audio, ReadTag, WriteTag},
     id3v1, id3v2,
 };
 use std::{
@@ -119,6 +119,50 @@ impl File {
     /// [`WriteTag`]: WriteTag
     fn tag_mut(&mut self) -> Option<&mut dyn WriteTag> {
         Some(self.tag.tag_mut())
+    }
+}
+
+impl Audio for File {
+    fn sample_rate(&self) -> f64 {
+        self.frames
+            .first()
+            .map(|frame| frame.header.sample_rate().unwrap_or(0))
+            .unwrap_or(0) as _
+    }
+
+    fn sample_size(&self) -> u16 {
+        let bit_rate = self
+            .frames
+            .first()
+            .map(|frame| match frame.header.bit_rate() {
+                Some(Bitrate::Rate(rate)) => rate,
+                Some(Bitrate::Free) => 0,
+                None => 0,
+            })
+            .unwrap_or(0);
+        let sample_rate = self.sample_rate();
+
+        if sample_rate == 0f64 {
+            return 0;
+        }
+
+        bit_rate as u16 / sample_rate as u16
+    }
+
+    fn channels(&self) -> u16 {
+        self.frames
+            .first()
+            .map(|frame| match frame.header.channel_mode() {
+                Some(
+                    ChannelMode::DualChannel
+                    | ChannelMode::Stereo
+                    | ChannelMode::JointStereoL1L2 { .. }
+                    | ChannelMode::JointStereoL3 { .. },
+                ) => 2,
+                Some(ChannelMode::SingleChannel) => 1,
+                None => 0,
+            })
+            .unwrap_or(0)
     }
 }
 
@@ -445,7 +489,8 @@ impl FrameHeader {
         self.0.to_be_bytes()
     }
 
-    /// Gives the length of the [`Frame`] in bytes (not the typical 4 byte slots).
+    /// Gives the length of the [`Frame`] in bytes (not the typical 4 byte slots). This is the
+    /// length when compressed.
     ///
     /// [`Frame`]: Frame
     fn frame_length(&self) -> Option<u32> {
@@ -460,6 +505,15 @@ impl FrameHeader {
                 144 * bit_rate / self.sample_rate()? + self.padding()?
             }
         })
+    }
+
+    /// The number of samples in the [`Frame`], this is a constant dependant on the MPEG layer. For
+    /// Layer I it is 384 samples, and for Layers II and III it is 1152 samples.
+    fn frame_size(&self) -> Option<u32> {
+        match self.layer()? {
+            Layer::LayerI => Some(384),
+            Layer::LayerII | Layer::LayerIII => Some(1152),
+        }
     }
 
     /// Get the [`Frame`]'s MPEG version.

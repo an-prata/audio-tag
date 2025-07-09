@@ -360,7 +360,9 @@ pub trait Audio {
     /// Sample rate of the sound in hertz.
     fn sample_rate(&self) -> f64;
 
-    /// Size of each sample in bits.
+    /// Size of each sample in bits. This might also be refered to as "bit depth", and should not
+    /// be affected by the number of channels present. e.g. 16-bit sample size means that a single
+    /// stereo frame is 32 bits.
     fn sample_size(&self) -> u16;
 
     /// Number of channels in the audio.
