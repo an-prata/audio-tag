@@ -411,7 +411,7 @@ impl<'d> Iterator for ChunksIter<'d> {
     fn next(&mut self) -> Option<Self::Item> {
         let (chunk, remaining_bytes) = TypelessChunk::from_bytes(self.remaining_bytes)?;
         self.remaining_bytes = remaining_bytes;
-        Some(chunk.typed()?)
+        chunk.typed()
     }
 }
 
