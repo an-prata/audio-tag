@@ -11,3 +11,4 @@ pub mod audio_info;
 pub mod id3v1;
 pub mod id3v2;
 pub mod mp3;
+pub mod wave;
