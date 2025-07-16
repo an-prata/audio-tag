@@ -1,5 +1,6 @@
 // NOTE: Waveform files are appearantly little endian :(
 
+use crate::audio_info::{self, Audio, ReadTag, TrackNumber, WriteTag, WriteTagError};
 use std::{error::Error, fmt::Display, fs, io, path::Path, result};
 
 type ChunkId = [u8; 4];
@@ -8,12 +9,43 @@ const ID_RIFF: ChunkId = *b"RIFF";
 const ID_PAD: ChunkId = *b"PAD ";
 const ID_JUNK: ChunkId = *b"JUNK";
 const ID_FACT: ChunkId = *b"fact";
-const ID_FORMAT: ChunkId = *b"fmt ";
+const ID_WAVE_FORMAT: ChunkId = *b"fmt ";
 const ID_WAVE_DATA: ChunkId = *b"data";
+const ID_LIST: ChunkId = *b"LIST";
+
+// Text chunk IDs
+const ID_ARCHIVAL_LOCATION: ChunkId = *b"IARL";
+const ID_ARTIST: ChunkId = *b"IART";
+const ID_COMMISSIONED: ChunkId = *b"ICMS";
+const ID_COMMENTS: ChunkId = *b"ICMT";
+const ID_COPYRIGHT: ChunkId = *b"ICOP";
+const ID_CREATION_DATE: ChunkId = *b"ICRD";
+const ID_CROPPED: ChunkId = *b"ICRP";
+const ID_DIMENSIONS: ChunkId = *b"IDIM";
+const ID_DOTS_PER_INCH: ChunkId = *b"IDPI";
+const ID_ENGINEER: ChunkId = *b"IENG";
+const ID_GENRE: ChunkId = *b"IGNR";
+const ID_KEYWORDS: ChunkId = *b"IKEY";
+const ID_LIGHTNESS_SETTINGS: ChunkId = *b"ILGT";
+const ID_MEDIUM: ChunkId = *b"IMED";
+const ID_NAME: ChunkId = *b"INAM";
+const ID_PALETTE_SETTINGS: ChunkId = *b"IPLT";
+const ID_PRODUCT: ChunkId = *b"IPRD";
+const ID_DESCRIPTION: ChunkId = *b"ISBJ";
+const ID_SOFTWARE: ChunkId = *b"ISFT";
+const ID_SHARPNESS: ChunkId = *b"ISHP";
+const ID_SOURCE: ChunkId = *b"ISRC";
+const ID_SOURCE_FORM: ChunkId = *b"ISRF";
+const ID_TECHNICIAN: ChunkId = *b"ITCH";
+const ID_SMPTE_TIME_CODE: ChunkId = *b"ISMP";
+const ID_DIGITIZATION_TIME: ChunkId = *b"IDIT";
+const ID_TRACK_NUMBER: ChunkId = *b"ITRK";
+const ID_TABLE_OF_CONTENTS: ChunkId = *b"ITOC";
 
 /// A RIFF file, which here we assume is a WAVE file, but it technically doesn't have to be. In the
 /// case that a non-WAVE RIFF file is parsed, its audio-related functions will fail as they would if
 /// the file is malformed.
+#[derive(Debug, Clone)]
 pub struct File {
     /// The top level [`RiffChunk`] containing all this RIFF's other [`Chunk`]s.
     ///
@@ -21,6 +53,9 @@ pub struct File {
     /// [`Chunk`]: Chunk
     riff: RiffChunk,
 }
+
+audio_info::impl_read_tag!(File, File::info_list);
+audio_info::impl_write_tag!(File, File::info_list_mut);
 
 impl File {
     /// Read a new [`wave::File`] from a file at the given [`AsRef<Path>`].
@@ -52,6 +87,65 @@ impl File {
             return Err(ParseError::ExpectedRiffChunk);
         }
     }
+
+    /// Get the contained [`InfoListChunk`] if it exists.
+    ///
+    /// [`InfoListChunk`]: InfoListChunk
+    fn info_list(&self) -> Option<&InfoListChunk> {
+        self.riff.chunks.iter().find_map(|chunk| match chunk {
+            Chunk::InfoList(info_list) => Some(info_list),
+            _ => None,
+        })
+    }
+
+    /// Get a mutable reference to the contained [`InfoListChunk`] if it exists.
+    ///
+    /// [`InfoListChunk`]: InfoListChunk
+    fn info_list_mut(&mut self) -> Option<&mut InfoListChunk> {
+        self.riff.chunks.iter_mut().find_map(|chunk| match chunk {
+            Chunk::InfoList(info_list) => Some(info_list),
+            _ => None,
+        })
+    }
+}
+
+impl Audio for File {
+    fn sample_rate(&self) -> f64 {
+        self.riff
+            .chunks
+            .iter()
+            .find_map(|chunk| match chunk {
+                Chunk::WaveFormat(WaveFormatChunk {
+                    samples_per_second, ..
+                }) => Some(*samples_per_second as f64),
+                _ => None,
+            })
+            .unwrap_or(0f64)
+    }
+
+    fn sample_size(&self) -> u16 {
+        self.riff
+            .chunks
+            .iter()
+            .find_map(|chunk| match chunk {
+                Chunk::WaveFormat(WaveFormatChunk {
+                    bits_per_sample, ..
+                }) => Some(*bits_per_sample),
+                _ => None,
+            })
+            .unwrap_or(0)
+    }
+
+    fn channels(&self) -> u16 {
+        self.riff
+            .chunks
+            .iter()
+            .find_map(|chunk| match chunk {
+                Chunk::WaveFormat(WaveFormatChunk { channels, .. }) => Some(*channels),
+                _ => None,
+            })
+            .unwrap_or(0)
+    }
 }
 
 /// A wrapping enum around all possible chunk types that may occur in a [`wave::File`].
@@ -66,6 +160,36 @@ enum Chunk {
     Junk(JunkChunk),
     Pad(PadChunk),
     WaveData(WaveDataChunk),
+
+    List(ListChunk),
+    InfoList(InfoListChunk),
+    ArchivalLocation(ArchivalLocationChunk),
+    Artist(ArtistChunk),
+    Commissioned(CommissionedChunk),
+    Comments(CommentsChunk),
+    Copyright(CopyrightChunk),
+    CreationDate(CreationDateChunk),
+    Cropped(CroppedChunk),
+    Dimensions(DimensionsChunk),
+    DotsPerInch(DotsPerInchChunk),
+    Engineer(EngineerChunk),
+    Genre(GenreChunk),
+    Keywords(KeywordsChunk),
+    LightnessSettings(LightnessSettingsChunk),
+    Medium(MediumChunk),
+    Name(NameChunk),
+    PaletteSettings(PaletteSettingsChunk),
+    Product(ProductChunk),
+    Description(DescriptionChunk),
+    Software(SoftwareChunk),
+    Sharpness(SharpnessChunk),
+    Source(SourceChunk),
+    SourceForm(SourceFormChunk),
+    Technician(TechnicianChunk),
+    SmpteTimeCode(SmpteTimeCodeChunk),
+    DigitizationTime(DigitizationTimeChunk),
+    TrackNumber(TrackNumberChunk),
+    TableOfContents(TableOfContentsChunk),
 }
 
 /// [`Result`] with [`ParseError`] prefilled.
@@ -79,12 +203,40 @@ type Result<T> = result::Result<T, ParseError>;
 /// [`wave::File`]: File
 #[derive(Debug)]
 pub enum ParseError {
+    /// An [`io::Error`] occured while reading a Waveform file.
+    ///
+    /// [`io::Error`]: io::Error
     Io(io::Error),
+
+    /// RIFF Waveform files should have just a single 'RIFF' chunk which contains all other chunks,
+    /// but more than one chunk was found at this top level.
     ExcessTopLevelChunks,
+
+    /// Expected a [`RiffChunk`] and did not find one.
+    ///
+    /// [`RiffChunk`]: RiffChunk
     ExpectedRiffChunk,
+
+    /// Expected a [`WaveFormatChunk`] but did not find one.
+    ///
+    /// [`WaveFormatChunk`]: WaveFormatChunk
     ExpectedFormatChunk,
+
+    /// Expected a [`WaveDataChunk`] chunk but did not find one.
+    ///
+    /// [`WaveDataChunk`]: WaveDataChunk
     ExpectedWaveDataChunk,
+
+    /// The [`WaveFormatChunk`] did not occure before the [`WaveDataChunk`], which is required by
+    /// Waveform files.
+    ///
+    /// [`WaveDataChunk`]: WaveDataChunk
+    /// [`WaveFormatChunk`]: WaveFormatChunk
     FormatNotBeforeData,
+
+    /// Expected a [`FactChunk`] but did not find one.
+    ///
+    /// [`FactChunk`]: FactChunk
     ExpectedFactChunk,
 }
 
@@ -219,6 +371,720 @@ struct FactChunk {
 struct WaveDataChunk {
     data: Vec<u8>,
 }
+
+/// A chunk constaining a list of subchunks.
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct ListChunk {
+    /// A tag which helps identify what information the [`ListChunk`] holds, but this should not in
+    /// any way change how the [`ListChunk`] is interpereted or parsed.
+    ///
+    /// [`ListChunk`]: ListChunk
+    tag: [u8; 4],
+    chunks: Vec<Chunk>,
+}
+
+/// A specific type of [`ListChunk`] which holds information about the file's contents.
+///
+/// [`ListChunk`]: ListChunk
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct InfoListChunk(Vec<Chunk>);
+
+impl ReadTag for InfoListChunk {
+    fn album_title(&self) -> Option<String> {
+        None
+    }
+
+    fn bpm(&self) -> Option<f64> {
+        None
+    }
+
+    fn composer(&self) -> Option<String> {
+        None
+    }
+
+    fn content_type(&self) -> Option<String> {
+        None
+    }
+
+    fn copyright_message(&self) -> Option<String> {
+        let InfoListChunk(chunks) = self;
+        chunks.iter().find_map(|chunk| match chunk {
+            Chunk::Copyright(CopyrightChunk(text)) => Some(text.clone()),
+            _ => None,
+        })
+    }
+
+    fn date(&self) -> Option<String> {
+        let InfoListChunk(chunks) = self;
+        chunks.iter().find_map(|chunk| match chunk {
+            Chunk::CreationDate(CreationDateChunk(text)) => Some(text.clone()),
+            _ => None,
+        })
+    }
+
+    fn playlist_delay(&self) -> Option<String> {
+        None
+    }
+
+    fn encoded_by(&self) -> Option<String> {
+        todo!()
+    }
+
+    fn lyricist(&self) -> Option<String> {
+        None
+    }
+
+    fn file_type(&self) -> Option<String> {
+        None
+    }
+
+    fn time(&self) -> Option<String> {
+        let InfoListChunk(chunks) = self;
+        chunks.iter().find_map(|chunk| match chunk {
+            Chunk::DigitizationTime(DigitizationTimeChunk(text)) => Some(text.clone()),
+            _ => None,
+        })
+    }
+
+    fn content_group_description(&self) -> Option<String> {
+        None
+    }
+
+    fn title(&self) -> Option<String> {
+        let InfoListChunk(chunks) = self;
+        chunks.iter().find_map(|chunk| match chunk {
+            Chunk::Name(NameChunk(text)) => Some(text.clone()),
+            _ => None,
+        })
+    }
+
+    fn subtitle(&self) -> Option<String> {
+        None
+    }
+
+    fn initial_key(&self) -> Option<crate::audio_info::Key> {
+        None
+    }
+
+    fn language(&self) -> Option<String> {
+        None
+    }
+
+    fn length(&self) -> Option<String> {
+        None
+    }
+
+    fn media_type(&self) -> Option<String> {
+        let InfoListChunk(chunks) = self;
+        chunks.iter().find_map(|chunk| match chunk {
+            Chunk::Medium(MediumChunk(text)) => Some(text.clone()),
+            _ => None,
+        })
+    }
+
+    fn original_album(&self) -> Option<String> {
+        None
+    }
+
+    fn original_filename(&self) -> Option<String> {
+        None
+    }
+
+    fn original_artist(&self) -> Option<String> {
+        None
+    }
+
+    fn original_release_year(&self) -> Option<u32> {
+        None
+    }
+
+    fn file_owner(&self) -> Option<String> {
+        None
+    }
+
+    fn lead_artist(&self) -> Option<String> {
+        None
+    }
+
+    fn band(&self) -> Option<String> {
+        None
+    }
+
+    fn conductor(&self) -> Option<String> {
+        None
+    }
+
+    fn modified_by(&self) -> Option<String> {
+        None
+    }
+
+    fn part_of_set(&self) -> Option<String> {
+        let InfoListChunk(chunks) = self;
+        chunks.iter().find_map(|chunk| match chunk {
+            Chunk::TableOfContents(TableOfContentsChunk(text)) => Some(text.clone()),
+            _ => None,
+        })
+    }
+
+    fn publisher(&self) -> Option<String> {
+        None
+    }
+
+    fn track_number(&self) -> Option<TrackNumber> {
+        let InfoListChunk(chunks) = self;
+        let text = chunks.iter().find_map(|chunk| match chunk {
+            Chunk::TrackNumber(TrackNumberChunk(text)) => Some(text.clone()),
+            _ => None,
+        })?;
+
+        Some(TrackNumber {
+            track: text.parse().ok()?,
+            of: None,
+        })
+    }
+
+    fn recording_date(&self) -> Option<String> {
+        None
+    }
+
+    fn internet_radio_station(&self) -> Option<String> {
+        None
+    }
+
+    fn size(&self) -> Option<String> {
+        None
+    }
+
+    fn isrc(&self) -> Option<String> {
+        None
+    }
+
+    fn encoding_settings(&self) -> Option<String> {
+        None
+    }
+
+    fn year(&self) -> Option<u32> {
+        let InfoListChunk(chunks) = self;
+        let text = chunks.iter().find_map(|chunk| match chunk {
+            Chunk::DigitizationTime(DigitizationTimeChunk(text)) => Some(text.clone()),
+            _ => None,
+        })?;
+
+        // `text` should be of format "Wed Jan 02 02:03:55 1990\n"
+        //                      index: 0   4   8  11       20  24
+
+        let year_text = &text[20..24];
+        year_text.parse().ok()
+    }
+}
+
+impl WriteTag for InfoListChunk {
+    fn write_album_title(&mut self, _value: Option<String>) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_bpm(&mut self, _value: Option<f64>) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_composer(&mut self, _value: Option<String>) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_content_type(&mut self, _value: Option<String>) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_copyright_message(
+        &mut self,
+        value: Option<String>,
+    ) -> result::Result<(), WriteTagError> {
+        let InfoListChunk(chunks) = self;
+
+        let value = match value {
+            None => {
+                let maybe_pos = chunks.iter().position(|chunk| match chunk {
+                    Chunk::Copyright(_) => true,
+                    _ => false,
+                });
+
+                if let Some(pos) = maybe_pos {
+                    chunks.remove(pos);
+                }
+
+                return Ok(());
+            }
+
+            Some(v) => v,
+        };
+
+        let text_res = chunks.iter_mut().find_map(|chunk| match chunk {
+            Chunk::Copyright(CopyrightChunk(text)) => Some(text),
+            _ => None,
+        });
+
+        if let Some(text) = text_res {
+            *text = value;
+        } else {
+            chunks.push(Chunk::Copyright(CopyrightChunk(value)));
+        }
+
+        Ok(())
+    }
+
+    fn write_date(&mut self, value: Option<String>) -> result::Result<(), WriteTagError> {
+        let InfoListChunk(chunks) = self;
+
+        let value = match value {
+            None => {
+                let maybe_pos = chunks.iter().position(|chunk| match chunk {
+                    Chunk::Copyright(_) => true,
+                    _ => false,
+                });
+
+                if let Some(pos) = maybe_pos {
+                    chunks.remove(pos);
+                }
+
+                return Ok(());
+            }
+
+            Some(v) => v,
+        };
+
+        let text_res = chunks.iter_mut().find_map(|chunk| match chunk {
+            Chunk::CreationDate(CreationDateChunk(text)) => Some(text),
+            _ => None,
+        });
+
+        if let Some(text) = text_res {
+            *text = value;
+        } else {
+            chunks.push(Chunk::CreationDate(CreationDateChunk(value)));
+        }
+
+        Ok(())
+    }
+
+    fn write_playlist_delay(
+        &mut self,
+        _value: Option<String>,
+    ) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_encoded_by(&mut self, _value: Option<String>) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_lyricist(&mut self, _value: Option<String>) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_file_type(&mut self, _value: Option<String>) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_time(&mut self, value: Option<String>) -> result::Result<(), WriteTagError> {
+        let InfoListChunk(chunks) = self;
+
+        let value = match value {
+            None => {
+                let maybe_pos = chunks.iter().position(|chunk| match chunk {
+                    Chunk::Copyright(_) => true,
+                    _ => false,
+                });
+
+                if let Some(pos) = maybe_pos {
+                    chunks.remove(pos);
+                }
+
+                return Ok(());
+            }
+
+            Some(v) => v,
+        };
+
+        let text_res = chunks.iter_mut().find_map(|chunk| match chunk {
+            Chunk::DigitizationTime(DigitizationTimeChunk(text)) => Some(text),
+            _ => None,
+        });
+
+        if let Some(text) = text_res {
+            *text = value;
+        } else {
+            chunks.push(Chunk::DigitizationTime(DigitizationTimeChunk(value)));
+        }
+
+        Ok(())
+    }
+
+    fn write_content_group_description(
+        &mut self,
+        _value: Option<String>,
+    ) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_title(&mut self, value: Option<String>) -> result::Result<(), WriteTagError> {
+        let InfoListChunk(chunks) = self;
+
+        let value = match value {
+            None => {
+                let maybe_pos = chunks.iter().position(|chunk| match chunk {
+                    Chunk::Copyright(_) => true,
+                    _ => false,
+                });
+
+                if let Some(pos) = maybe_pos {
+                    chunks.remove(pos);
+                }
+
+                return Ok(());
+            }
+
+            Some(v) => v,
+        };
+
+        let text_res = chunks.iter_mut().find_map(|chunk| match chunk {
+            Chunk::Name(NameChunk(text)) => Some(text),
+            _ => None,
+        });
+
+        if let Some(text) = text_res {
+            *text = value;
+        } else {
+            chunks.push(Chunk::Name(NameChunk(value)));
+        }
+
+        Ok(())
+    }
+
+    fn write_subtitle(&mut self, _value: Option<String>) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_initial_key(
+        &mut self,
+        _value: Option<crate::audio_info::Key>,
+    ) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_language(&mut self, _value: Option<String>) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_length(&mut self, _value: Option<String>) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_media_type(&mut self, value: Option<String>) -> result::Result<(), WriteTagError> {
+        let InfoListChunk(chunks) = self;
+
+        let value = match value {
+            None => {
+                let maybe_pos = chunks.iter().position(|chunk| match chunk {
+                    Chunk::Copyright(_) => true,
+                    _ => false,
+                });
+
+                if let Some(pos) = maybe_pos {
+                    chunks.remove(pos);
+                }
+
+                return Ok(());
+            }
+
+            Some(v) => v,
+        };
+
+        let text_res = chunks.iter_mut().find_map(|chunk| match chunk {
+            Chunk::Medium(MediumChunk(text)) => Some(text),
+            _ => None,
+        });
+
+        if let Some(text) = text_res {
+            *text = value;
+        } else {
+            chunks.push(Chunk::Medium(MediumChunk(value)));
+        }
+
+        Ok(())
+    }
+
+    fn write_original_album(
+        &mut self,
+        _value: Option<String>,
+    ) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_original_filename(
+        &mut self,
+        _value: Option<String>,
+    ) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_original_artist(
+        &mut self,
+        _value: Option<String>,
+    ) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_original_release_year(
+        &mut self,
+        _value: Option<u32>,
+    ) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_file_owner(&mut self, _value: Option<String>) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_lead_artist(&mut self, _value: Option<String>) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_band(&mut self, _value: Option<String>) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_conductor(&mut self, _value: Option<String>) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_modified_by(&mut self, _value: Option<String>) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_part_of_set(&mut self, value: Option<String>) -> result::Result<(), WriteTagError> {
+        let InfoListChunk(chunks) = self;
+
+        let value = match value {
+            None => {
+                let maybe_pos = chunks.iter().position(|chunk| match chunk {
+                    Chunk::Copyright(_) => true,
+                    _ => false,
+                });
+
+                if let Some(pos) = maybe_pos {
+                    chunks.remove(pos);
+                }
+
+                return Ok(());
+            }
+
+            Some(v) => v,
+        };
+
+        let text_res = chunks.iter_mut().find_map(|chunk| match chunk {
+            Chunk::TableOfContents(TableOfContentsChunk(text)) => Some(text),
+            _ => None,
+        });
+
+        if let Some(text) = text_res {
+            *text = value;
+        } else {
+            chunks.push(Chunk::TableOfContents(TableOfContentsChunk(value)));
+        }
+
+        Ok(())
+    }
+
+    fn write_publisher(&mut self, _value: Option<String>) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_track_number(
+        &mut self,
+        value: Option<TrackNumber>,
+    ) -> result::Result<(), WriteTagError> {
+        let InfoListChunk(chunks) = self;
+
+        let value = match value {
+            None => {
+                let maybe_pos = chunks.iter().position(|chunk| match chunk {
+                    Chunk::Copyright(_) => true,
+                    _ => false,
+                });
+
+                if let Some(pos) = maybe_pos {
+                    chunks.remove(pos);
+                }
+
+                return Ok(());
+            }
+
+            Some(v) => v,
+        };
+
+        let track_number = chunks.iter_mut().find_map(|chunk| match chunk {
+            Chunk::TrackNumber(TrackNumberChunk(text)) => Some(text),
+            _ => None,
+        });
+
+        if let Some(text) = track_number {
+            *text = value.track.to_string();
+        } else {
+            chunks.push(Chunk::TrackNumber(TrackNumberChunk(
+                value.track.to_string(),
+            )));
+        }
+
+        Ok(())
+    }
+
+    fn write_recording_date(
+        &mut self,
+        _value: Option<String>,
+    ) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_internet_radio_station(
+        &mut self,
+        _value: Option<String>,
+    ) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_size(&mut self, _value: Option<String>) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_isrc(&mut self, _value: Option<String>) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_encoding_settings(
+        &mut self,
+        _value: Option<String>,
+    ) -> result::Result<(), WriteTagError> {
+        Err(WriteTagError::FieldNotSupported)
+    }
+
+    fn write_year(&mut self, value: Option<u32>) -> result::Result<(), WriteTagError> {
+        let InfoListChunk(chunks) = self;
+
+        let value = match value {
+            None => {
+                let maybe_pos = chunks.iter().position(|chunk| match chunk {
+                    Chunk::Copyright(_) => true,
+                    _ => false,
+                });
+
+                if let Some(pos) = maybe_pos {
+                    chunks.remove(pos);
+                }
+
+                return Ok(());
+            }
+
+            Some(v) => v.to_string(),
+        };
+
+        let text_res = chunks.iter_mut().find_map(|chunk| match chunk {
+            Chunk::TableOfContents(TableOfContentsChunk(text)) => Some(text),
+            _ => None,
+        });
+
+        if let Some(text) = text_res {
+            text.truncate(20);
+            text.push_str(&value);
+        } else {
+            let mut text = "Mon Jan 01 12:00:00 ".to_string();
+            text.push_str(&value);
+            chunks.push(Chunk::TableOfContents(TableOfContentsChunk(text)));
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct ArchivalLocationChunk(String);
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct ArtistChunk(String);
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct CommissionedChunk(String);
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct CommentsChunk(String);
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct CopyrightChunk(String);
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct CreationDateChunk(String);
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct CroppedChunk(String);
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct DimensionsChunk(String);
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct DotsPerInchChunk(String);
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct EngineerChunk(String);
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct GenreChunk(String);
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct KeywordsChunk(String);
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct LightnessSettingsChunk(String);
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct MediumChunk(String);
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct NameChunk(String);
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct PaletteSettingsChunk(String);
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct ProductChunk(String);
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct DescriptionChunk(String);
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct SoftwareChunk(String);
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct SharpnessChunk(String);
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct SourceChunk(String);
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct SourceFormChunk(String);
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct TechnicianChunk(String);
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct SmpteTimeCodeChunk(String);
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct DigitizationTimeChunk(String);
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct TrackNumberChunk(String);
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct TableOfContentsChunk(String);
 
 /// An [`Iterator`] over WAVE RIFF [`Chunk`]s.
 ///
@@ -775,9 +1641,39 @@ const WAVE_FORMAT_YAMAHA_ADPCM: WaveFormatTag = 0x0020;
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 struct AdpcmCoefficientSet(i32, i32);
 
+/// A chunk containing text. This isn't really a typed chunk yet, just a common data format between
+/// many chunks.
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct TextChunk {
+    id: ChunkId,
+    text: String,
+}
+
+impl TextChunk {
+    /// Take the given [`TypelessChunk`] to be a ZSTR chunk containing a null-terminated string.
+    ///
+    /// [`TypelessChunk`]: TypelessChunk
+    fn from_zstr_chunk(mut chunk: TypelessChunk) -> Option<TextChunk> {
+        if *chunk.data.last()? != b'\0' {
+            return None;
+        }
+
+        // remove the null character
+        chunk.data.pop();
+
+        Some(TextChunk {
+            id: chunk.id,
+            text: String::from_utf8(chunk.data).ok()?,
+        })
+    }
+}
+
+/// A chunk without a yet interpereted type or data format.
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct TypelessChunk {
-    id: [u8; 4],
+    /// The chunk's ID, which should be used to determing how to interperet the contents of the
+    /// `data` field.
+    id: ChunkId,
     data: Vec<u8>,
 }
 
@@ -802,11 +1698,129 @@ impl TypelessChunk {
     fn typed(self) -> Option<Chunk> {
         match self.id {
             ID_RIFF => Some(Chunk::Riff(self.riff_chunk()?)),
-            ID_FORMAT => Some(Chunk::WaveFormat(self.wave_format_chunk()?)),
+            ID_WAVE_FORMAT => Some(Chunk::WaveFormat(self.wave_format_chunk()?)),
             ID_JUNK => Some(Chunk::Junk(self.junk_chunk())),
             ID_PAD => Some(Chunk::Pad(self.pad_chunk())),
             ID_FACT => Some(Chunk::Fact(self.fact_chunk()?)),
             ID_WAVE_DATA => Some(Chunk::WaveData(WaveDataChunk { data: self.data })),
+            ID_LIST => {
+                let list = self.list_chunk()?;
+
+                match list.tag {
+                    [b'I', b'N', b'F', b'O'] => Some(Chunk::InfoList(InfoListChunk(list.chunks))),
+                    _ => Some(Chunk::List(list)),
+                }
+            }
+
+            ID_ARCHIVAL_LOCATION => {
+                let TextChunk { text, .. } = TextChunk::from_zstr_chunk(self)?;
+                Some(Chunk::ArchivalLocation(ArchivalLocationChunk(text)))
+            }
+            ID_ARTIST => {
+                let TextChunk { text, .. } = TextChunk::from_zstr_chunk(self)?;
+                Some(Chunk::Artist(ArtistChunk(text)))
+            }
+            ID_COMMISSIONED => {
+                let TextChunk { text, .. } = TextChunk::from_zstr_chunk(self)?;
+                Some(Chunk::Commissioned(CommissionedChunk(text)))
+            }
+            ID_COMMENTS => {
+                let TextChunk { text, .. } = TextChunk::from_zstr_chunk(self)?;
+                Some(Chunk::Comments(CommentsChunk(text)))
+            }
+            ID_COPYRIGHT => {
+                let TextChunk { text, .. } = TextChunk::from_zstr_chunk(self)?;
+                Some(Chunk::Copyright(CopyrightChunk(text)))
+            }
+            ID_CREATION_DATE => {
+                let TextChunk { text, .. } = TextChunk::from_zstr_chunk(self)?;
+                Some(Chunk::CreationDate(CreationDateChunk(text)))
+            }
+            ID_CROPPED => {
+                let TextChunk { text, .. } = TextChunk::from_zstr_chunk(self)?;
+                Some(Chunk::Cropped(CroppedChunk(text)))
+            }
+            ID_DOTS_PER_INCH => {
+                let TextChunk { text, .. } = TextChunk::from_zstr_chunk(self)?;
+                Some(Chunk::DotsPerInch(DotsPerInchChunk(text)))
+            }
+            ID_DIMENSIONS => {
+                let TextChunk { text, .. } = TextChunk::from_zstr_chunk(self)?;
+                Some(Chunk::Dimensions(DimensionsChunk(text)))
+            }
+            ID_ENGINEER => {
+                let TextChunk { text, .. } = TextChunk::from_zstr_chunk(self)?;
+                Some(Chunk::Engineer(EngineerChunk(text)))
+            }
+            ID_GENRE => {
+                let TextChunk { text, .. } = TextChunk::from_zstr_chunk(self)?;
+                Some(Chunk::Genre(GenreChunk(text)))
+            }
+            ID_KEYWORDS => {
+                let TextChunk { text, .. } = TextChunk::from_zstr_chunk(self)?;
+                Some(Chunk::Keywords(KeywordsChunk(text)))
+            }
+            ID_LIGHTNESS_SETTINGS => {
+                let TextChunk { text, .. } = TextChunk::from_zstr_chunk(self)?;
+                Some(Chunk::LightnessSettings(LightnessSettingsChunk(text)))
+            }
+            ID_MEDIUM => {
+                let TextChunk { text, .. } = TextChunk::from_zstr_chunk(self)?;
+                Some(Chunk::Medium(MediumChunk(text)))
+            }
+            ID_NAME => {
+                let TextChunk { text, .. } = TextChunk::from_zstr_chunk(self)?;
+                Some(Chunk::Name(NameChunk(text)))
+            }
+            ID_PALETTE_SETTINGS => {
+                let TextChunk { text, .. } = TextChunk::from_zstr_chunk(self)?;
+                Some(Chunk::PaletteSettings(PaletteSettingsChunk(text)))
+            }
+            ID_PRODUCT => {
+                let TextChunk { text, .. } = TextChunk::from_zstr_chunk(self)?;
+                Some(Chunk::Product(ProductChunk(text)))
+            }
+            ID_DESCRIPTION => {
+                let TextChunk { text, .. } = TextChunk::from_zstr_chunk(self)?;
+                Some(Chunk::Description(DescriptionChunk(text)))
+            }
+            ID_SOFTWARE => {
+                let TextChunk { text, .. } = TextChunk::from_zstr_chunk(self)?;
+                Some(Chunk::Software(SoftwareChunk(text)))
+            }
+            ID_SHARPNESS => {
+                let TextChunk { text, .. } = TextChunk::from_zstr_chunk(self)?;
+                Some(Chunk::Sharpness(SharpnessChunk(text)))
+            }
+            ID_SOURCE => {
+                let TextChunk { text, .. } = TextChunk::from_zstr_chunk(self)?;
+                Some(Chunk::Source(SourceChunk(text)))
+            }
+            ID_SOURCE_FORM => {
+                let TextChunk { text, .. } = TextChunk::from_zstr_chunk(self)?;
+                Some(Chunk::SourceForm(SourceFormChunk(text)))
+            }
+            ID_TECHNICIAN => {
+                let TextChunk { text, .. } = TextChunk::from_zstr_chunk(self)?;
+                Some(Chunk::Technician(TechnicianChunk(text)))
+            }
+            ID_SMPTE_TIME_CODE => {
+                let TextChunk { text, .. } = TextChunk::from_zstr_chunk(self)?;
+                Some(Chunk::SmpteTimeCode(SmpteTimeCodeChunk(text)))
+            }
+            ID_DIGITIZATION_TIME => {
+                let TextChunk { text, .. } = TextChunk::from_zstr_chunk(self)?;
+                Some(Chunk::DigitizationTime(DigitizationTimeChunk(text)))
+            }
+            ID_TRACK_NUMBER => {
+                let TextChunk { text, .. } = TextChunk::from_zstr_chunk(self)?;
+                Some(Chunk::TrackNumber(TrackNumberChunk(text)))
+            }
+            ID_TABLE_OF_CONTENTS => {
+                let TextChunk { text, .. } = TextChunk::from_zstr_chunk(self)?;
+                Some(Chunk::TableOfContents(TableOfContentsChunk(text)))
+            }
+
             _ => Some(Chunk::Typeless(self)),
         }
     }
@@ -889,5 +1903,15 @@ impl TypelessChunk {
     /// [`PadChunk`]: PadChunk
     fn pad_chunk(self) -> PadChunk {
         PadChunk(self.data)
+    }
+
+    fn list_chunk(self) -> Option<ListChunk> {
+        let tag = *self.data[0..4].as_array()?;
+        let chunks: Vec<Chunk> = ChunksIter {
+            remaining_bytes: &self.data[4..],
+        }
+        .collect();
+
+        Some(ListChunk { tag, chunks })
     }
 }
