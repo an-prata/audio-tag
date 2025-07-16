@@ -1,4 +1,4 @@
-use crate::{aiff, mp3};
+use crate::{aiff, mp3, wave};
 use std::{fmt::Display, io, path::Path};
 
 /// Implements [`ReadTag`] for a given type using a given function to get an
@@ -376,6 +376,11 @@ pub enum AudioFile {
     ///
     /// [`mp3::File`]: mp3::File
     Mp3(mp3::File),
+
+    /// A Waveform file, as represented by the [`wave::File`] type.
+    ///
+    /// [`wave::File`]: wave::File
+    Wave(wave::File),
 }
 
 impl_read_tag!(AudioFile, AudioFile::tag);
@@ -425,6 +430,11 @@ impl AudioFile {
                 Ok(AudioFile::Mp3(mp3_file))
             }
 
+            Some("wav" | "wave") => {
+                let wav_file = wave::File::read_from(path)?;
+                Ok(AudioFile::Wave(wav_file))
+            }
+
             _ => Err(AudioFileError::NoSuchFileType),
         }
     }
@@ -437,6 +447,7 @@ impl AudioFile {
         match self {
             AudioFile::Aiff(file) => Some(file),
             AudioFile::Mp3(file) => Some(file),
+            AudioFile::Wave(file) => Some(file),
         }
     }
 
@@ -449,6 +460,7 @@ impl AudioFile {
         match self {
             AudioFile::Aiff(file) => Some(file),
             AudioFile::Mp3(file) => Some(file),
+            AudioFile::Wave(_) => None,
         }
     }
 }
@@ -458,6 +470,7 @@ impl Audio for AudioFile {
         match self {
             AudioFile::Aiff(file) => file.sample_rate(),
             AudioFile::Mp3(file) => file.sample_rate(),
+            AudioFile::Wave(file) => file.sample_rate(),
         }
     }
 
@@ -465,6 +478,7 @@ impl Audio for AudioFile {
         match self {
             AudioFile::Aiff(file) => file.sample_size(),
             AudioFile::Mp3(file) => file.sample_size(),
+            AudioFile::Wave(file) => file.sample_size(),
         }
     }
 
@@ -472,6 +486,7 @@ impl Audio for AudioFile {
         match self {
             AudioFile::Aiff(file) => file.channels(),
             AudioFile::Mp3(file) => file.channels(),
+            AudioFile::Wave(file) => file.channels(),
         }
     }
 }
@@ -804,6 +819,7 @@ impl Key {
 pub enum AudioFileError {
     AiffParseError(aiff::ParseError),
     Mp3ParseError(mp3::ParseError),
+    WaveParseError(wave::ParseError),
     Io(io::Error),
     NoSuchFileType,
 }
@@ -820,11 +836,18 @@ impl From<mp3::ParseError> for AudioFileError {
     }
 }
 
+impl From<wave::ParseError> for AudioFileError {
+    fn from(value: wave::ParseError) -> Self {
+        AudioFileError::WaveParseError(value)
+    }
+}
+
 impl Display for AudioFileError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AudioFileError::AiffParseError(error) => write!(f, "Audio File Error: {}", error),
             AudioFileError::Mp3ParseError(error) => write!(f, "Audio File Error: {}", error),
+            AudioFileError::WaveParseError(error) => write!(f, "Audio File Error: {}", error),
             AudioFileError::Io(error) => write!(f, "Audio File Error: {}", error),
             AudioFileError::NoSuchFileType => {
                 write!(f, "Audio File Error: No matching audio file type")
