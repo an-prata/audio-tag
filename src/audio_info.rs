@@ -409,6 +409,10 @@ impl AudioFile {
             return Ok(AudioFile::Mp3(mp3));
         }
 
+        if let Ok(wave) = wave::File::read_from(&path) {
+            return Ok(AudioFile::Wave(wave));
+        }
+
         Err(AudioFileError::NoSuchFileType)
     }
 
@@ -439,6 +443,26 @@ impl AudioFile {
         }
     }
 
+    /// Write this [`AudioFile`] to the given [`AsRef<Path>`].
+    ///
+    /// [`AsRef<Path>`]: AsRef<Path>
+    /// [`AudioFile`]: AudioFile
+    pub fn write_to(self, path: impl AsRef<Path>) -> Result<(), AudioFileError> {
+        match self {
+            AudioFile::Aiff(file) => file
+                .write_to(path)
+                .map_err(|err| AudioFileError::AiffParseError(err)),
+
+            AudioFile::Mp3(file) => file
+                .write_to(path)
+                .map_err(|err| AudioFileError::Mp3ParseError(err)),
+
+            AudioFile::Wave(file) => file
+                .write_to(path)
+                .map_err(|err| AudioFileError::WaveParseError(err)),
+        }
+    }
+
     /// Get a dynamic reference to a [`ReadTag`] instance contained within the given [`AudioFile`].
     ///
     /// [`ReadTag`]: ReadTag
@@ -460,7 +484,7 @@ impl AudioFile {
         match self {
             AudioFile::Aiff(file) => Some(file),
             AudioFile::Mp3(file) => Some(file),
-            AudioFile::Wave(_) => None,
+            AudioFile::Wave(file) => Some(file),
         }
     }
 }
