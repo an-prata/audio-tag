@@ -589,23 +589,7 @@ impl RiffChunk {
             return Err(ParseError::FormatNotBeforeData);
         }
 
-        let format = self.chunks.iter().find_map(|c| match c {
-            Chunk::WaveFormat(WaveFormatChunk { format, .. }) => Some(format),
-            _ => None,
-        });
-
-        if let Some(WaveFormat::MicrosoftPCM) = format {
-            return Ok(());
-        } else {
-            self.chunks
-                .iter()
-                .find(|c| match c {
-                    Chunk::Fact(_) => true,
-                    _ => false,
-                })
-                .ok_or(ParseError::ExpectedFactChunk)?;
-            Ok(())
-        }
+        Ok(())
     }
 }
 
@@ -1480,6 +1464,13 @@ enum WaveFormat {
     // MPEG has a bunch of stuff going on, I'm hoping I can defer to the MP3 code I've already
     // written cause that shit was annoying.
     Unknown,
+    Extensible {
+        valid_bits_per_sample: u16,
+        speaker_position_mask: u32,
+
+        /// The first two bytes also make up a sub-format tag.
+        guid: [u8; 16],
+    },
     MicrosoftPCM,
     MicrosoftADPCM {
         samples_per_block: u16,
@@ -1672,6 +1663,22 @@ impl WaveFormat {
 
             WAVE_FORMAT_UNKNOWN => Some(WaveFormat::Unknown),
 
+            WAVE_FORMAT_EXTENSIBLE => {
+                if bytes.len() < 22 {
+                    return None;
+                }
+
+                let valid_bits_per_sample = u16::from_le_bytes(*bytes[0..2].as_array()?);
+                let speaker_position_mask = u32::from_le_bytes(*bytes[2..6].as_array()?);
+                let guid = *bytes[6..22].as_array()?;
+
+                Some(WaveFormat::Extensible {
+                    valid_bits_per_sample,
+                    speaker_position_mask,
+                    guid,
+                })
+            }
+
             WAVE_FORMAT_MICROSOFT_PCM => Some(WaveFormat::MicrosoftPCM),
 
             WAVE_FORMAT_MICROSOFT_ADPCM => {
@@ -1813,6 +1820,7 @@ impl WaveFormat {
             WaveFormat::OlivettiOPR => WAVE_FORMAT_OLIVETTI_OPR,
             WaveFormat::IntelDviADPCM { .. } => WAVE_FORMAT_INTEL_DVI_ADPCM,
             WaveFormat::Unknown => WAVE_FORMAT_UNKNOWN,
+            WaveFormat::Extensible { .. } => WAVE_FORMAT_EXTENSIBLE,
             WaveFormat::MicrosoftPCM => WAVE_FORMAT_MICROSOFT_PCM,
             WaveFormat::MicrosoftADPCM { .. } => WAVE_FORMAT_MICROSOFT_ADPCM,
             WaveFormat::MicrosoftALaw => WAVE_FORMAT_MICROSOFT_ALAW,
@@ -1838,24 +1846,31 @@ impl WaveFormat {
             WaveFormat::AntexElectronicsADPCMG723 { aux_block_size } => {
                 bytes.append(&mut aux_block_size.to_le_bytes().to_vec())
             }
+
             WaveFormat::AntexElectronicsADPCMG721 { aux_block_size } => {
                 bytes.append(&mut aux_block_size.to_le_bytes().to_vec())
             }
+
             WaveFormat::ControlsResourcesVQLPC { compression_type } => {
                 bytes.append(&mut compression_type.to_le_bytes().to_vec())
             }
+
             WaveFormat::CreativeLabsADPCM { revision } => {
                 bytes.append(&mut revision.to_le_bytes().to_vec())
             }
+
             WaveFormat::CreativeLabsFastSpeech8 { revision } => {
                 bytes.append(&mut revision.to_le_bytes().to_vec())
             }
+
             WaveFormat::CreativeLabsFastSpeech10 { revision } => {
                 bytes.append(&mut revision.to_le_bytes().to_vec())
             }
+
             WaveFormat::DolbyAC2 { aux_bits_code } => {
                 bytes.append(&mut aux_bits_code.to_le_bytes().to_vec())
             }
+
             WaveFormat::DspGroupTrueSpeech {
                 revision,
                 samples_per_block,
@@ -1865,9 +1880,21 @@ impl WaveFormat {
                 bytes.append(&mut samples_per_block.to_le_bytes().to_vec());
                 bytes.append(&mut proprietary_fields.to_vec());
             }
+
             WaveFormat::IntelDviADPCM { samples_per_block } => {
                 bytes.append(&mut samples_per_block.to_le_bytes().to_vec())
             }
+
+            WaveFormat::Extensible {
+                valid_bits_per_sample,
+                speaker_position_mask,
+                guid,
+            } => {
+                bytes.append(&mut valid_bits_per_sample.to_le_bytes().to_vec());
+                bytes.append(&mut speaker_position_mask.to_le_bytes().to_vec());
+                bytes.append(&mut guid.to_vec());
+            }
+
             WaveFormat::MicrosoftADPCM {
                 samples_per_block,
                 coefficient_sets,
@@ -1888,16 +1915,21 @@ impl WaveFormat {
                         .collect(),
                 );
             }
+
             WaveFormat::OkiADPCM { pole } => bytes.append(&mut pole.to_le_bytes().to_vec()),
+
             WaveFormat::SierraADPCM { revision } => {
                 bytes.append(&mut revision.to_le_bytes().to_vec())
             }
+
             WaveFormat::SpeechCompressionSONARC { compression_type } => {
                 bytes.append(&mut compression_type.to_le_bytes().to_vec())
             }
+
             WaveFormat::VideoLogicMediaSpaceADPCM { revision } => {
                 bytes.append(&mut revision.to_le_bytes().to_vec())
             }
+
             _ => (),
         }
 
@@ -1964,6 +1996,7 @@ const WAVE_FORMAT_INTEL_DVI_ADPCM: WaveFormatTag = 0x0011;
 
 // From Microsoft:
 const WAVE_FORMAT_UNKNOWN: WaveFormatTag = 0x0000;
+const WAVE_FORMAT_EXTENSIBLE: WaveFormatTag = 0xFFFE;
 const WAVE_FORMAT_MICROSOFT_PCM: WaveFormatTag = 0x0001;
 const WAVE_FORMAT_MICROSOFT_ADPCM: WaveFormatTag = 0x0002;
 const WAVE_FORMAT_MICROSOFT_ALAW: WaveFormatTag = 0x0006;
