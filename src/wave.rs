@@ -67,6 +67,15 @@ impl File {
         File::from_bytes(&bytes)
     }
 
+    /// Write [`wave::File`] to the given [`AsRef<Path>`].
+    ///
+    /// [`wave::File`]: File
+    /// [`AsRef<Path>`]: AsRef<Path>
+    pub fn write_to(self, path: impl AsRef<Path>) -> Result<()> {
+        let bytes = self.to_bytes()?;
+        fs::write(path, bytes).map_err(|io_err| ParseError::Io(io_err))
+    }
+
     /// Parse a [`wave::File`] from bytes.
     ///
     /// [`wave::File`]: File
@@ -86,6 +95,13 @@ impl File {
         } else {
             return Err(ParseError::ExpectedRiffChunk);
         }
+    }
+
+    /// Turn this [`wave::File`] into bytes which represent a Waveform file.
+    ///
+    /// [`wave::File`]: File
+    fn to_bytes(self) -> Result<Vec<u8>> {
+        Chunk::Riff(self.riff).to_bytes()
     }
 
     /// Get the contained [`InfoListChunk`] if it exists.
@@ -160,9 +176,9 @@ enum Chunk {
     Junk(JunkChunk),
     Pad(PadChunk),
     WaveData(WaveDataChunk),
-
     List(ListChunk),
     InfoList(InfoListChunk),
+
     ArchivalLocation(ArchivalLocationChunk),
     Artist(ArtistChunk),
     Commissioned(CommissionedChunk),
@@ -190,6 +206,259 @@ enum Chunk {
     DigitizationTime(DigitizationTimeChunk),
     TrackNumber(TrackNumberChunk),
     TableOfContents(TableOfContentsChunk),
+}
+
+impl Chunk {
+    /// Returns this [`Chunk`] to being a [`TypelessChunk`].
+    ///
+    /// [`Chunk`]: Chunk
+    /// [`TypelessChunk`]: TypelessChunk
+    fn detype(self) -> Result<TypelessChunk> {
+        match self {
+            Chunk::Typeless(typeless_chunk) => Ok(typeless_chunk),
+
+            Chunk::Riff(RiffChunk { tag, chunks }) => {
+                let mut bytes: Vec<u8> = Vec::new();
+                bytes.append(&mut tag.to_vec());
+
+                for chunk in chunks {
+                    bytes.append(&mut chunk.to_bytes()?);
+                }
+
+                Ok(TypelessChunk {
+                    id: ID_RIFF,
+                    data: bytes,
+                })
+            }
+
+            Chunk::WaveFormat(WaveFormatChunk {
+                format,
+                channels,
+                samples_per_second,
+                average_bytes_per_second,
+                block_align,
+                bits_per_sample,
+            }) => {
+                let mut bytes: Vec<u8> = Vec::new();
+                let (format_tag, mut extension) = format.to_bytes();
+                bytes.append(&mut format_tag.to_le_bytes().to_vec());
+                bytes.append(&mut channels.to_le_bytes().to_vec());
+                bytes.append(&mut samples_per_second.to_le_bytes().to_vec());
+                bytes.append(&mut average_bytes_per_second.to_le_bytes().to_vec());
+                bytes.append(&mut block_align.to_le_bytes().to_vec());
+                bytes.append(&mut bits_per_sample.to_le_bytes().to_vec());
+                bytes.append(&mut extension);
+                Ok(TypelessChunk {
+                    id: ID_RIFF,
+                    data: bytes,
+                })
+            }
+            Chunk::Fact(FactChunk { sample_length }) => Ok(TypelessChunk {
+                id: ID_FACT,
+                data: sample_length.to_le_bytes().to_vec(),
+            }),
+            Chunk::Junk(JunkChunk(data)) => Ok(TypelessChunk { id: ID_JUNK, data }),
+            Chunk::Pad(PadChunk(data)) => Ok(TypelessChunk { id: ID_PAD, data }),
+            Chunk::WaveData(WaveDataChunk { data }) => Ok(TypelessChunk {
+                id: ID_WAVE_DATA,
+                data,
+            }),
+            Chunk::List(ListChunk { tag, chunks }) => {
+                let mut bytes: Vec<u8> = Vec::new();
+                bytes.append(&mut tag.to_vec());
+
+                for chunk in chunks {
+                    bytes.append(&mut chunk.to_bytes()?);
+                }
+
+                Ok(TypelessChunk {
+                    id: ID_RIFF,
+                    data: bytes,
+                })
+            }
+            Chunk::InfoList(InfoListChunk(chunks)) => {
+                let mut bytes: Vec<u8> = vec![b'I', b'N', b'F', b'O'];
+
+                for chunk in chunks {
+                    bytes.append(&mut chunk.to_bytes()?);
+                }
+
+                Ok(TypelessChunk {
+                    id: ID_RIFF,
+                    data: bytes,
+                })
+            }
+
+            Chunk::ArchivalLocation(ArchivalLocationChunk(text)) => TextChunk {
+                id: ID_ARCHIVAL_LOCATION,
+                text,
+            }
+            .detype(),
+
+            Chunk::Artist(ArtistChunk(text)) => TextChunk {
+                id: ID_ARTIST,
+                text,
+            }
+            .detype(),
+
+            Chunk::Commissioned(CommissionedChunk(text)) => TextChunk {
+                id: ID_COMMISSIONED,
+                text,
+            }
+            .detype(),
+
+            Chunk::Comments(CommentsChunk(text)) => TextChunk {
+                id: ID_COMMENTS,
+                text,
+            }
+            .detype(),
+
+            Chunk::Copyright(CopyrightChunk(text)) => TextChunk {
+                id: ID_COPYRIGHT,
+                text,
+            }
+            .detype(),
+
+            Chunk::CreationDate(CreationDateChunk(text)) => TextChunk {
+                id: ID_CREATION_DATE,
+                text,
+            }
+            .detype(),
+
+            Chunk::Cropped(CroppedChunk(text)) => TextChunk {
+                id: ID_CROPPED,
+                text,
+            }
+            .detype(),
+
+            Chunk::Dimensions(DimensionsChunk(text)) => TextChunk {
+                id: ID_DIMENSIONS,
+                text,
+            }
+            .detype(),
+
+            Chunk::DotsPerInch(DotsPerInchChunk(text)) => TextChunk {
+                id: ID_DOTS_PER_INCH,
+                text,
+            }
+            .detype(),
+
+            Chunk::Engineer(EngineerChunk(text)) => TextChunk {
+                id: ID_ENGINEER,
+                text,
+            }
+            .detype(),
+
+            Chunk::Genre(GenreChunk(text)) => TextChunk { id: ID_GENRE, text }.detype(),
+
+            Chunk::Keywords(KeywordsChunk(text)) => TextChunk {
+                id: ID_KEYWORDS,
+                text,
+            }
+            .detype(),
+
+            Chunk::LightnessSettings(LightnessSettingsChunk(text)) => TextChunk {
+                id: ID_LIGHTNESS_SETTINGS,
+                text,
+            }
+            .detype(),
+
+            Chunk::Medium(MediumChunk(text)) => TextChunk {
+                id: ID_MEDIUM,
+                text,
+            }
+            .detype(),
+
+            Chunk::Name(NameChunk(text)) => TextChunk { id: ID_NAME, text }.detype(),
+
+            Chunk::PaletteSettings(PaletteSettingsChunk(text)) => TextChunk {
+                id: ID_PALETTE_SETTINGS,
+                text,
+            }
+            .detype(),
+
+            Chunk::Product(ProductChunk(text)) => TextChunk {
+                id: ID_PRODUCT,
+                text,
+            }
+            .detype(),
+
+            Chunk::Description(DescriptionChunk(text)) => TextChunk {
+                id: ID_DESCRIPTION,
+                text,
+            }
+            .detype(),
+
+            Chunk::Software(SoftwareChunk(text)) => TextChunk {
+                id: ID_SOFTWARE,
+                text,
+            }
+            .detype(),
+
+            Chunk::Sharpness(SharpnessChunk(text)) => TextChunk {
+                id: ID_SHARPNESS,
+                text,
+            }
+            .detype(),
+
+            Chunk::Source(SourceChunk(text)) => TextChunk {
+                id: ID_SOURCE,
+                text,
+            }
+            .detype(),
+
+            Chunk::SourceForm(SourceFormChunk(text)) => TextChunk {
+                id: ID_SOURCE_FORM,
+                text,
+            }
+            .detype(),
+
+            Chunk::Technician(TechnicianChunk(text)) => TextChunk {
+                id: ID_TECHNICIAN,
+                text,
+            }
+            .detype(),
+
+            Chunk::SmpteTimeCode(SmpteTimeCodeChunk(text)) => TextChunk {
+                id: ID_SMPTE_TIME_CODE,
+                text,
+            }
+            .detype(),
+
+            Chunk::DigitizationTime(DigitizationTimeChunk(text)) => TextChunk {
+                id: ID_DIGITIZATION_TIME,
+                text,
+            }
+            .detype(),
+
+            Chunk::TrackNumber(TrackNumberChunk(text)) => TextChunk {
+                id: ID_TRACK_NUMBER,
+                text,
+            }
+            .detype(),
+
+            Chunk::TableOfContents(TableOfContentsChunk(text)) => TextChunk {
+                id: ID_TABLE_OF_CONTENTS,
+                text,
+            }
+            .detype(),
+        }
+    }
+
+    /// Turn this [`Chunk`] into bytes which can be parsed back into a [`Chunk`].
+    ///
+    /// [`Chunk`]: Chunk
+    fn to_bytes(self) -> Result<Vec<u8>> {
+        self.detype().map(TypelessChunk::to_bytes)
+    }
+}
+
+pub enum WriteError {
+    /// A [`String`] which is expected to be an [`AsciiString`] failed the conversion to ASCII.
+    ///
+    /// [`String`]: String
+    /// [`AsciiString`]: AsciiStr
+    NonAsciiString,
 }
 
 /// [`Result`] with [`ParseError`] prefilled.
@@ -238,6 +507,11 @@ pub enum ParseError {
     ///
     /// [`FactChunk`]: FactChunk
     ExpectedFactChunk,
+
+    /// Expected [`String`] to be ASCII but it was not.
+    ///
+    /// [`String`]: String
+    NonAsciiString,
 }
 
 impl Display for ParseError {
@@ -267,6 +541,9 @@ impl Display for ParseError {
                     f,
                     "WAVE's format requires a FACT chunk, but none were found"
                 )
+            }
+            ParseError::NonAsciiString => {
+                write!(f, "expected `String` to be ASCII, but it was not")
             }
         }
     }
@@ -1552,6 +1829,80 @@ impl WaveFormat {
             WaveFormat::YamahaADPCM => WAVE_FORMAT_YAMAHA_ADPCM,
         }
     }
+
+    fn to_bytes(self) -> (WaveFormatTag, Vec<u8>) {
+        let mut bytes = Vec::new();
+        let tag = self.format_tag();
+
+        match self {
+            WaveFormat::AntexElectronicsADPCMG723 { aux_block_size } => {
+                bytes.append(&mut aux_block_size.to_le_bytes().to_vec())
+            }
+            WaveFormat::AntexElectronicsADPCMG721 { aux_block_size } => {
+                bytes.append(&mut aux_block_size.to_le_bytes().to_vec())
+            }
+            WaveFormat::ControlsResourcesVQLPC { compression_type } => {
+                bytes.append(&mut compression_type.to_le_bytes().to_vec())
+            }
+            WaveFormat::CreativeLabsADPCM { revision } => {
+                bytes.append(&mut revision.to_le_bytes().to_vec())
+            }
+            WaveFormat::CreativeLabsFastSpeech8 { revision } => {
+                bytes.append(&mut revision.to_le_bytes().to_vec())
+            }
+            WaveFormat::CreativeLabsFastSpeech10 { revision } => {
+                bytes.append(&mut revision.to_le_bytes().to_vec())
+            }
+            WaveFormat::DolbyAC2 { aux_bits_code } => {
+                bytes.append(&mut aux_bits_code.to_le_bytes().to_vec())
+            }
+            WaveFormat::DspGroupTrueSpeech {
+                revision,
+                samples_per_block,
+                proprietary_fields,
+            } => {
+                bytes.append(&mut revision.to_le_bytes().to_vec());
+                bytes.append(&mut samples_per_block.to_le_bytes().to_vec());
+                bytes.append(&mut proprietary_fields.to_vec());
+            }
+            WaveFormat::IntelDviADPCM { samples_per_block } => {
+                bytes.append(&mut samples_per_block.to_le_bytes().to_vec())
+            }
+            WaveFormat::MicrosoftADPCM {
+                samples_per_block,
+                coefficient_sets,
+            } => {
+                bytes.append(&mut samples_per_block.to_le_bytes().to_vec());
+                bytes.append(
+                    &mut coefficient_sets
+                        .into_iter()
+                        .flat_map(|AdpcmCoefficientSet(a, b)| {
+                            let a_bytes = a.to_le_bytes();
+                            let b_bytes = b.to_le_bytes();
+
+                            [
+                                a_bytes[0], a_bytes[1], a_bytes[2], a_bytes[3], b_bytes[0],
+                                b_bytes[1], b_bytes[2], b_bytes[3],
+                            ]
+                        })
+                        .collect(),
+                );
+            }
+            WaveFormat::OkiADPCM { pole } => bytes.append(&mut pole.to_le_bytes().to_vec()),
+            WaveFormat::SierraADPCM { revision } => {
+                bytes.append(&mut revision.to_le_bytes().to_vec())
+            }
+            WaveFormat::SpeechCompressionSONARC { compression_type } => {
+                bytes.append(&mut compression_type.to_le_bytes().to_vec())
+            }
+            WaveFormat::VideoLogicMediaSpaceADPCM { revision } => {
+                bytes.append(&mut revision.to_le_bytes().to_vec())
+            }
+            _ => (),
+        }
+
+        (tag, bytes)
+    }
 }
 
 type WaveFormatTag = u16;
@@ -1666,6 +2017,23 @@ impl TextChunk {
             text: String::from_utf8(chunk.data).ok()?,
         })
     }
+
+    /// Turn the [`TextChunk`] into a [`TypelessChunk`]. This conversion requires that the
+    /// [`TextChunk`]'s `text` field contains valid ASCII.
+    ///
+    /// [`TextChunk`]: TextChunk
+    /// [`TypelessChunk`]: TypelessChunk
+    fn detype(self) -> Result<TypelessChunk> {
+        let ascii = self.text.as_ascii().ok_or(ParseError::NonAsciiString)?;
+
+        Ok(TypelessChunk {
+            id: self.id,
+            data: ascii
+                .into_iter()
+                .map(|ascii_char| ascii_char.to_u8())
+                .collect(),
+        })
+    }
 }
 
 /// A chunk without a yet interpereted type or data format.
@@ -1689,6 +2057,17 @@ impl TypelessChunk {
         let data = bytes[8..8 + size].to_vec();
 
         Some((TypelessChunk { id, data }, &bytes[8 + size..]))
+    }
+
+    /// Turn this [`TypelessChunk`] into bytes which can be parsed back into a [`TypelessChunk`].
+    ///
+    /// [`TypelessChunk`]: TypelessChunk
+    fn to_bytes(mut self) -> Vec<u8> {
+        let mut bytes: Vec<u8> = Vec::new();
+        bytes.append(&mut self.id.to_vec());
+        bytes.append(&mut (self.data.len() as u32).to_le_bytes().to_vec());
+        bytes.append(&mut self.data);
+        bytes
     }
 
     /// Read the given [`TypelessChunk`]'s `id` field and attempt to interperet it as the associated
