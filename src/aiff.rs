@@ -582,7 +582,7 @@ struct AudioRecordingChunk {
 struct ApplicationSpecificChunk {
     /// Identifies the particular application. For Macintosh applications this is the application's
     /// four character signature. For Apple II applications the signature should always be 'pdos'.
-    /// If `application_signature` is 'pdos' the beginning of data is defined as a Pasal-style
+    /// If `application_signature` is 'pdos' the beginning of data is defined as a Pascal-style
     /// ShortString containing the name of the application. This is needed as Apple II applications
     /// do not have four-byte signatures like Macintosh applications.
     application_signature: OsType,

@@ -453,14 +453,6 @@ impl Chunk {
     }
 }
 
-pub enum WriteError {
-    /// A [`String`] which is expected to be an [`AsciiString`] failed the conversion to ASCII.
-    ///
-    /// [`String`]: String
-    /// [`AsciiString`]: AsciiStr
-    NonAsciiString,
-}
-
 /// [`Result`] with [`ParseError`] prefilled.
 ///
 /// [`Result`]: result::Result
@@ -628,6 +620,10 @@ struct FactChunk {
     sample_length: u32,
 }
 
+/// Contains sample data, the exact format of this depends on the data within the
+/// [`WaveFormatChunk`].
+///
+/// [`WaveFormatChunk`]: WaveFormatChunk
 #[derive(PartialEq, Eq, Clone, Debug)]
 struct WaveDataChunk {
     data: Vec<u8>,
@@ -1420,7 +1416,7 @@ enum WaveFormat {
     DspGroupTrueSpeech {
         revision: u16,
         samples_per_block: u32,
-        // There are supposedly more field, which are proprietary, that would equate to a total
+        // There are supposedly more fields, which are proprietary, that would equate to a total
         // format extension size of 32 bytes.
         proprietary_fields: [u8; 32 - 2 - 4],
     },
