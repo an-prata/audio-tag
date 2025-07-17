@@ -249,7 +249,7 @@ impl Chunk {
                 bytes.append(&mut bits_per_sample.to_le_bytes().to_vec());
                 bytes.append(&mut extension);
                 Ok(TypelessChunk {
-                    id: ID_RIFF,
+                    id: ID_WAVE_FORMAT,
                     data: bytes,
                 })
             }
@@ -272,7 +272,7 @@ impl Chunk {
                 }
 
                 Ok(TypelessChunk {
-                    id: ID_RIFF,
+                    id: ID_LIST,
                     data: bytes,
                 })
             }
@@ -284,7 +284,7 @@ impl Chunk {
                 }
 
                 Ok(TypelessChunk {
-                    id: ID_RIFF,
+                    id: ID_LIST,
                     data: bytes,
                 })
             }
@@ -2085,8 +2085,17 @@ impl TypelessChunk {
     /// [`TypelessChunk`]: TypelessChunk
     /// [`None`]: Option::None
     fn from_bytes(bytes: &[u8]) -> Option<(TypelessChunk, &[u8])> {
+        if bytes.len() < 8 {
+            return None;
+        }
+
         let id = *bytes[0..4].as_array()?;
         let size = u32::from_le_bytes(*bytes[4..8].as_array()?) as usize;
+
+        if bytes.len() < 8 + size {
+            return None;
+        }
+
         let data = bytes[8..8 + size].to_vec();
 
         Some((TypelessChunk { id, data }, &bytes[8 + size..]))
@@ -2262,7 +2271,7 @@ impl TypelessChunk {
     fn wave_format_chunk(self) -> Option<WaveFormatChunk> {
         let bytes = &self.data;
 
-        if bytes.len() < 18 {
+        if bytes.len() < 16 {
             return None;
         }
 
@@ -2274,8 +2283,15 @@ impl TypelessChunk {
         let bits_per_sample = u16::from_le_bytes(*bytes[14..16].as_array()?);
 
         let format_tag = u16::from_le_bytes(*bytes[0..2].as_array()?);
-        let extension_size = u16::from_le_bytes(*bytes[16..18].as_array()?) as usize;
-        let format = WaveFormat::read_format_extension(format_tag, extension_size, &bytes[18..])?;
+        let extension_size = match bytes.len() {
+            ..18 => 0,
+            18.. => u16::from_le_bytes(*bytes[16..18].as_array()?) as usize,
+        };
+
+        let format = match bytes.len() {
+            ..18 => WaveFormat::read_format_extension(format_tag, extension_size, &[])?,
+            18.. => WaveFormat::read_format_extension(format_tag, extension_size, &bytes[18..])?,
+        };
 
         Some(WaveFormatChunk {
             format,
