@@ -1,7 +1,8 @@
-use crate::audio_info::{self, Audio, ReadTag};
+use crate::audio_info::{self, Audio, ReadTag, WriteTag};
 use std::{collections::HashMap, error::Error, fmt::Display, fs, io, path::Path, result};
 
 /// A FLAC file.
+#[derive(Debug, Clone)]
 pub struct File {
     metadata_blocks: Vec<MetadataBlock>,
     frame_data: Vec<u8>,
@@ -67,15 +68,30 @@ impl File {
         })
     }
 
+    /// Returns the [`VorbisCommentBlock`] of the FLAC's metadata blocks if it exists.
+    ///
+    /// [`VorbisCommentBlock`]: VorbisCommentBlock
+    fn vorbis_comment_block_mut(&mut self) -> Option<&mut VorbisCommentBlock> {
+        self.metadata_blocks
+            .iter_mut()
+            .find_map(|block| match block {
+                MetadataBlock::VorbisComment(vorbis_comment) => Some(vorbis_comment),
+                _ => None,
+            })
+    }
+
     /// Gets the value of the given fields from the [`VorbisCommentBlock`] of the FLAC's metadata
     /// blocks so long as both the [`VorbisCommentBlock`] exists, as well as the field being gotten.
     ///
     /// [`VorbisCommentBlock`]: VorbisCommentBlock
     fn vorbis_comment_field_value(&self, field_name: &str) -> Option<String> {
         let vorbis = self.vorbis_comment_block()?;
-        vorbis.fields.get(field_name).map(|s| s.to_owned())
+        vorbis.get_field(field_name)
     }
 }
+
+audio_info::impl_read_tag!(File, File::vorbis_comment_block);
+audio_info::impl_write_tag!(File, File::vorbis_comment_block_mut);
 
 impl Audio for File {
     fn sample_rate(&self) -> f64 {
@@ -97,30 +113,29 @@ impl Audio for File {
     }
 }
 
-impl ReadTag for File {
+impl ReadTag for VorbisCommentBlock {
     fn album_title(&self) -> Option<String> {
-        self.vorbis_comment_field_value("album")
+        self.get_field("album")
     }
 
     fn bpm(&self) -> Option<f64> {
-        self.vorbis_comment_field_value("bpm")?.parse().ok()
+        self.get_field("bpm")?.parse().ok()
     }
 
     fn composer(&self) -> Option<String> {
-        self.vorbis_comment_field_value("composer")
+        self.get_field("composer")
     }
 
     fn content_type(&self) -> Option<String> {
-        todo!()
+        None
     }
 
     fn copyright_message(&self) -> Option<String> {
-        self.vorbis_comment_field_value("copyright")
+        self.get_field("copyright")
     }
 
     fn date(&self) -> Option<String> {
-        self.vorbis_comment_field_value("date")
-            .or_else(|| self.vorbis_comment_field_value("releasedate"))
+        self.get_field("date")
     }
 
     fn playlist_delay(&self) -> Option<String> {
@@ -128,11 +143,11 @@ impl ReadTag for File {
     }
 
     fn encoded_by(&self) -> Option<String> {
-        self.vorbis_comment_field_value("encodedby")
+        self.get_field("encodedby")
     }
 
     fn lyricist(&self) -> Option<String> {
-        self.vorbis_comment_field_value("lyricist")
+        self.get_field("lyricist")
     }
 
     fn file_type(&self) -> Option<String> {
@@ -148,15 +163,15 @@ impl ReadTag for File {
     }
 
     fn title(&self) -> Option<String> {
-        self.vorbis_comment_field_value("title")
+        self.get_field("title")
     }
 
     fn subtitle(&self) -> Option<String> {
-        self.vorbis_comment_field_value("subtitle")
+        self.get_field("subtitle")
     }
 
     fn initial_key(&self) -> Option<audio_info::Key> {
-        audio_info::Key::parse_key(&self.vorbis_comment_field_value("key")?)
+        audio_info::Key::parse_key(&self.get_field("key")?)
     }
 
     fn language(&self) -> Option<String> {
@@ -172,11 +187,11 @@ impl ReadTag for File {
     }
 
     fn original_album(&self) -> Option<String> {
-        self.vorbis_comment_field_value("originalalbum")
+        self.get_field("originalalbum")
     }
 
     fn original_filename(&self) -> Option<String> {
-        self.vorbis_comment_field_value("originalfilename")
+        self.get_field("originalfilename")
     }
 
     fn original_artist(&self) -> Option<String> {
@@ -184,10 +199,10 @@ impl ReadTag for File {
     }
 
     fn original_release_year(&self) -> Option<u32> {
-        let year = match self.vorbis_comment_field_value("originalyear") {
+        let year = match self.get_field("originalyear") {
             Some(y) => y,
             None => {
-                let mut date = self.vorbis_comment_field_value("originaldate")?;
+                let mut date = self.get_field("originaldate")?;
                 date.truncate(4);
                 date
             }
@@ -201,7 +216,7 @@ impl ReadTag for File {
     }
 
     fn lead_artist(&self) -> Option<String> {
-        self.vorbis_comment_field_value("artist")
+        self.get_field("artist")
     }
 
     fn band(&self) -> Option<String> {
@@ -209,7 +224,7 @@ impl ReadTag for File {
     }
 
     fn conductor(&self) -> Option<String> {
-        self.vorbis_comment_field_value("conductor")
+        self.get_field("conductor")
     }
 
     fn modified_by(&self) -> Option<String> {
@@ -225,8 +240,8 @@ impl ReadTag for File {
     }
 
     fn track_number(&self) -> Option<audio_info::TrackNumber> {
-        let track_string = self.vorbis_comment_field_value("tracknumber")?;
-        let total_string = self.vorbis_comment_field_value("totaltracks");
+        let track_string = self.get_field("tracknumber")?;
+        let total_string = self.get_field("totaltracks");
 
         let track: u32 = track_string.parse().ok()?;
         let total: Option<u32> = total_string.and_then(|t| t.parse().ok());
@@ -247,7 +262,7 @@ impl ReadTag for File {
     }
 
     fn isrc(&self) -> Option<String> {
-        self.vorbis_comment_field_value("isrc")
+        self.get_field("isrc")
     }
 
     fn encoding_settings(&self) -> Option<String> {
@@ -255,9 +270,294 @@ impl ReadTag for File {
     }
 
     fn year(&self) -> Option<u32> {
-        let mut date = self.vorbis_comment_field_value("date")?;
+        let mut date = self.get_field("date")?;
         date.truncate(4);
         date.parse().ok()
+    }
+}
+
+impl WriteTag for VorbisCommentBlock {
+    fn write_album_title(
+        &mut self,
+        value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        self.set_field("album".to_string(), value);
+        Ok(())
+    }
+
+    fn write_bpm(&mut self, value: Option<f64>) -> result::Result<(), audio_info::WriteTagError> {
+        self.set_field("bpm".to_string(), value.map(|v| format!("{:?}", v)));
+        Ok(())
+    }
+
+    fn write_composer(
+        &mut self,
+        value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        self.set_field("composer".to_string(), value);
+        Ok(())
+    }
+
+    fn write_content_type(
+        &mut self,
+        _value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        Err(audio_info::WriteTagError::FieldNotSupported)
+    }
+
+    fn write_copyright_message(
+        &mut self,
+        value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        self.set_field("copyright".to_string(), value);
+        Ok(())
+    }
+
+    fn write_date(
+        &mut self,
+        value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        self.set_field("date".to_string(), value);
+        Ok(())
+    }
+
+    fn write_playlist_delay(
+        &mut self,
+        _value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        Err(audio_info::WriteTagError::FieldNotSupported)
+    }
+
+    fn write_encoded_by(
+        &mut self,
+        value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        self.set_field("encodedby".to_string(), value);
+        Ok(())
+    }
+
+    fn write_lyricist(
+        &mut self,
+        value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        self.set_field("lyricist".to_string(), value);
+        Ok(())
+    }
+
+    fn write_file_type(
+        &mut self,
+        _value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        Err(audio_info::WriteTagError::FieldNotSupported)
+    }
+
+    fn write_time(
+        &mut self,
+        _value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        Err(audio_info::WriteTagError::FieldNotSupported)
+    }
+
+    fn write_content_group_description(
+        &mut self,
+        _value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        Err(audio_info::WriteTagError::FieldNotSupported)
+    }
+
+    fn write_title(
+        &mut self,
+        value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        self.set_field("title".to_string(), value);
+        Ok(())
+    }
+
+    fn write_subtitle(
+        &mut self,
+        value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        self.set_field("subtitle".to_string(), value);
+        Ok(())
+    }
+
+    fn write_initial_key(
+        &mut self,
+        value: Option<audio_info::Key>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        self.set_field("key".to_string(), value.map(|k| k.to_string()));
+        Ok(())
+    }
+
+    fn write_language(
+        &mut self,
+        _value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        Err(audio_info::WriteTagError::FieldNotSupported)
+    }
+
+    fn write_length(
+        &mut self,
+        _value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        Err(audio_info::WriteTagError::FieldNotSupported)
+    }
+
+    fn write_media_type(
+        &mut self,
+        _value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        Err(audio_info::WriteTagError::FieldNotSupported)
+    }
+
+    fn write_original_album(
+        &mut self,
+        value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        self.set_field("originalalbum".to_string(), value);
+        Ok(())
+    }
+
+    fn write_original_filename(
+        &mut self,
+        value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        self.set_field("originalfilename".to_string(), value);
+        Ok(())
+    }
+
+    fn write_original_artist(
+        &mut self,
+        value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        self.set_field("originalartist".to_string(), value);
+        Ok(())
+    }
+
+    fn write_original_release_year(
+        &mut self,
+        value: Option<u32>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        self.set_field("originalyear".to_string(), value.map(|v| format!("{}", v)));
+        Ok(())
+    }
+
+    fn write_file_owner(
+        &mut self,
+        _value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        Err(audio_info::WriteTagError::FieldNotSupported)
+    }
+
+    fn write_lead_artist(
+        &mut self,
+        value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        self.set_field("artist".to_string(), value);
+        Ok(())
+    }
+
+    fn write_band(
+        &mut self,
+        _value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        Err(audio_info::WriteTagError::FieldNotSupported)
+    }
+
+    fn write_conductor(
+        &mut self,
+        value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        self.set_field("conductor".to_string(), value);
+        Ok(())
+    }
+
+    fn write_modified_by(
+        &mut self,
+        _value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        Err(audio_info::WriteTagError::FieldNotSupported)
+    }
+
+    fn write_part_of_set(
+        &mut self,
+        _value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        Err(audio_info::WriteTagError::FieldNotSupported)
+    }
+
+    fn write_publisher(
+        &mut self,
+        _value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        Err(audio_info::WriteTagError::FieldNotSupported)
+    }
+
+    fn write_track_number(
+        &mut self,
+        value: Option<audio_info::TrackNumber>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        match value {
+            Some(track_number) => {
+                self.set_field(
+                    "tracknumber".to_string(),
+                    Some(format!("{}", track_number.track)),
+                );
+
+                self.set_field(
+                    "totaltracks".to_string(),
+                    track_number.of.map(|v| format!("{}", v)),
+                );
+
+                Ok(())
+            }
+
+            None => {
+                let _ = self.fields.remove("tracknumber");
+                let _ = self.fields.remove("totaltracks");
+                Ok(())
+            }
+        }
+    }
+
+    fn write_recording_date(
+        &mut self,
+        _value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        Err(audio_info::WriteTagError::FieldNotSupported)
+    }
+
+    fn write_internet_radio_station(
+        &mut self,
+        _value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        Err(audio_info::WriteTagError::FieldNotSupported)
+    }
+
+    fn write_size(
+        &mut self,
+        _value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        Err(audio_info::WriteTagError::FieldNotSupported)
+    }
+
+    fn write_isrc(
+        &mut self,
+        value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        self.set_field("isrc".to_string(), value);
+        Ok(())
+    }
+
+    fn write_encoding_settings(
+        &mut self,
+        _value: Option<String>,
+    ) -> result::Result<(), audio_info::WriteTagError> {
+        Err(audio_info::WriteTagError::FieldNotSupported)
+    }
+
+    fn write_year(&mut self, _value: Option<u32>) -> result::Result<(), audio_info::WriteTagError> {
+        Err(audio_info::WriteTagError::FieldNotSupported)
     }
 }
 
@@ -768,6 +1068,32 @@ impl MetadataBlockHeader {
         let MetadataBlockHeader(data) = self;
         let size_bits = data & METADATA_HEADER_MASK_SIZE;
         size_bits as _
+    }
+}
+
+impl VorbisCommentBlock {
+    /// Get a field by name from the [`VorbisCommentBlock`].
+    ///
+    /// [`VorbisCommentBlock`]: VorbisCommentBlock
+    fn get_field(&self, name: &str) -> Option<String> {
+        self.fields.get(name).map(|x| x.to_owned())
+    }
+
+    /// Sets a field in the [`VorbisCommentBlock`], overwriting it if the field already existed, and
+    /// adding a field if it did not. If `value` is [`None`], then the field is removed if it
+    /// exists, and if it does not no changes are made.
+    ///
+    /// [`VorbisCommentBlock`]: VorbisCommentBlock
+    fn set_field(&mut self, name: String, value: Option<String>) {
+        match value {
+            Some(v) => {
+                let _ = self.fields.insert(name, v);
+            }
+
+            None => {
+                let _ = self.fields.remove(&name);
+            }
+        }
     }
 }
 

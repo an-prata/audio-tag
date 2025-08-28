@@ -460,13 +460,14 @@ struct CommonChunk {
     /// | ch 1 | ch 2 |   | ch 1 | ch 2 |   | ch 1 | ch 2 |
     channels: i16,
 
-    /// The total number of sample frams of the entire multi-channel audio. Note that this is not
+    /// The total number of sample frames of the entire multi-channel audio. Note that this is not
     /// the number of sample _points_, which would be the number of sample frames times the number
     /// of channels.
     num_sample_frames: u32,
 
     /// The number of bits (not bytes) for each sample point (not frame). May be any number from 1
-    /// to 32.
+    /// to 32. When stored this value is effectively rounded to the nearest byte, so a 20-bit sample
+    /// would be stored as 3 bytes, where the 4 least significant bits are all 0.
     sample_size: i16,
 
     /// The rate at which sound is sampled, in sample frames (not points) per second.
