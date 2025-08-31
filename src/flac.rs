@@ -48,6 +48,31 @@ impl File {
         })
     }
 
+    /// Destructure the given [`flac::File`] into bytes.
+    ///
+    /// [`flac::File`]: File
+    pub fn to_bytes(mut self) -> Vec<u8> {
+        let mut bytes: Vec<u8> = vec![b'f', b'L', b'a', b'C'];
+        let mut metadata_blocks: Vec<TypelessMetadataBlock> = self
+            .metadata_blocks
+            .into_iter()
+            .map(MetadataBlock::untype)
+            .collect();
+
+        if let Some(last) = metadata_blocks.last_mut() {
+            last.header = last.header.make_last();
+        }
+
+        bytes.append(
+            &mut metadata_blocks
+                .into_iter()
+                .flat_map(TypelessMetadataBlock::to_bytes)
+                .collect(),
+        );
+        bytes.append(&mut self.frame_data);
+        bytes
+    }
+
     /// Returns the [`StreamInfoBlock`] of the FLAC's metadata blocks if it exists.
     ///
     /// [`StreamInfoBlock`]: StreamInfoBlock
@@ -78,15 +103,6 @@ impl File {
                 MetadataBlock::VorbisComment(vorbis_comment) => Some(vorbis_comment),
                 _ => None,
             })
-    }
-
-    /// Gets the value of the given fields from the [`VorbisCommentBlock`] of the FLAC's metadata
-    /// blocks so long as both the [`VorbisCommentBlock`] exists, as well as the field being gotten.
-    ///
-    /// [`VorbisCommentBlock`]: VorbisCommentBlock
-    fn vorbis_comment_field_value(&self, field_name: &str) -> Option<String> {
-        let vorbis = self.vorbis_comment_block()?;
-        vorbis.get_field(field_name)
     }
 }
 
@@ -614,6 +630,19 @@ enum MetadataBlock {
     Unknown(TypelessMetadataBlock),
 }
 
+impl MetadataBlock {
+    fn untype(self) -> TypelessMetadataBlock {
+        match self {
+            MetadataBlock::StreamInfo(stream_info_block) => stream_info_block.untype(),
+            MetadataBlock::Padding(padding_block) => padding_block.untype(),
+            MetadataBlock::Application(application_block) => application_block.untype(),
+            MetadataBlock::VorbisComment(vorbis_comment_block) => todo!(),
+            MetadataBlock::Unknown(typeless_metadata_block) => typeless_metadata_block,
+            _ => unreachable!("All other variants are currently not produced"),
+        }
+    }
+}
+
 /// Contains information relevant to the entire audio stream. This block must be the first metadata
 /// block presented, and there must be one and only one instance of this block.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -657,6 +686,46 @@ struct StreamInfoBlock {
     md5_checksum: Option<u128>,
 }
 
+impl StreamInfoBlock {
+    /// Creates a [`TypelessMetadataBlock`] equivilent to the given [`StreamInfoBlock`].
+    ///
+    /// [`TypelessMetadataBlock`]: TypelessMetadataBlock
+    /// [`StreamInfoBlock`]: StreamInfoBlock
+    fn untype(self) -> TypelessMetadataBlock {
+        let mut bit_writer = BitWriter::new();
+
+        bit_writer.push16(self.min_block_samples, 16);
+        bit_writer.push16(self.max_block_samples, 16);
+
+        match self.min_frame_size {
+            None => bit_writer.push32(0, 24),
+            Some(s) => bit_writer.push32(s, 24),
+        };
+
+        match self.max_frame_size {
+            None => bit_writer.push32(0, 24),
+            Some(s) => bit_writer.push32(s, 24),
+        };
+
+        bit_writer.push32(self.sample_rate, 20);
+        bit_writer.push8(self.number_of_channels - 1, 3);
+        bit_writer.push8(self.bits_per_sample - 1, 5);
+        bit_writer.push64(self.number_of_interchannel_samples, 36);
+
+        match self.md5_checksum {
+            None => bit_writer.push128(0, 128),
+            Some(md5) => bit_writer.push128(md5, 128),
+        };
+
+        let data = bit_writer.flush();
+
+        TypelessMetadataBlock {
+            header: MetadataBlockHeader::new(false, MetadataBlockType::StreamInfo, data.len() as _),
+            data,
+        }
+    }
+}
+
 /// A metadata block which holds padding zero bytes. There may be any number of this block type in a
 /// FLAC file.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -664,6 +733,15 @@ struct PaddingBlock {
     /// Size of the padding in bytes. Since once we parse the FLAC we don't actually care about
     /// what's in the padding, we just store its size here so that we can recreate it later.
     size: usize,
+}
+
+impl PaddingBlock {
+    fn untype(self) -> TypelessMetadataBlock {
+        TypelessMetadataBlock {
+            header: MetadataBlockHeader::new(false, MetadataBlockType::Padding, self.size as _),
+            data: vec![0; self.size],
+        }
+    }
 }
 
 /// A metadata block for information used by third-party applications.
@@ -678,6 +756,22 @@ struct ApplicationBlock {
     ///
     /// [`MetadataBlockHeader`]: MetadataBlockHeader
     application_data: Vec<u8>,
+}
+
+impl ApplicationBlock {
+    fn untype(mut self) -> TypelessMetadataBlock {
+        let mut data: Vec<u8> = self.application_id.to_be_bytes().to_vec();
+        data.append(&mut self.application_data);
+
+        TypelessMetadataBlock {
+            header: MetadataBlockHeader::new(
+                false,
+                MetadataBlockType::Application,
+                data.len() as _,
+            ),
+            data,
+        }
+    }
 }
 
 /// There may only be on of this type of matadata block in a FLAC. [`SeekPoint`]s contained in this
@@ -730,8 +824,37 @@ impl PartialOrd for SeekPoint {
 /// A FLAC may not contain more than one of this type of block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct VorbisCommentBlock {
-    vendor_string: String,
+    vendor_string: [u8; 4],
     fields: HashMap<String, String>,
+}
+
+impl VorbisCommentBlock {
+    fn untype(self) -> TypelessMetadataBlock {
+        let mut data_bytes: Vec<u8> = Vec::new();
+
+        data_bytes.append(&mut self.vendor_string.to_vec());
+        data_bytes.append(&mut self.fields.len().to_le_bytes().to_vec());
+
+        for (field_name, field_val) in self.fields {
+            let mut field_bytes: Vec<u8> = Vec::new();
+            let mut field_string_bytes = format!("{}={}", field_name, field_val).into_bytes();
+            field_bytes.append(&mut (field_string_bytes.len() as u32).to_le_bytes().to_vec());
+            field_bytes.append(&mut field_string_bytes);
+            data_bytes.append(&mut field_bytes);
+        }
+
+        let mut data = (data_bytes.len() as u32).to_le_bytes().to_vec();
+        data.append(&mut data_bytes);
+
+        TypelessMetadataBlock {
+            header: MetadataBlockHeader::new(
+                false,
+                MetadataBlockType::VorbisComment,
+                data_bytes.len() as _,
+            ),
+            data: data_bytes,
+        }
+    }
 }
 
 /// May be used to store the track and index point structure of a Compact Disc Digital Audio (CD-DA)
@@ -917,6 +1040,14 @@ impl TypelessMetadataBlock {
         ))
     }
 
+    fn to_bytes(self) -> Vec<u8> {
+        let TypelessMetadataBlock { header, mut data } = self;
+        let mut bytes = header.to_bytes().to_vec();
+
+        bytes.append(&mut data);
+        bytes
+    }
+
     fn typed(self) -> Option<MetadataBlock> {
         match self.header.block_type() {
             MetadataBlockType::StreamInfo => {
@@ -976,7 +1107,7 @@ impl TypelessMetadataBlock {
                     return None;
                 }
 
-                let vendor_string = String::from_utf8(self.data[4..length + 4].to_vec()).ok()?;
+                let vendor_string = *self.data[4..length + 4].as_array()?;
                 let num_fields = u32::from_le_bytes(*self.data[length + 4..length + 8].as_array()?);
 
                 if num_fields == 0 {
@@ -1025,6 +1156,32 @@ impl TypelessMetadataBlock {
 }
 
 impl MetadataBlockHeader {
+    /// Create a new [`MetadataBlockHeader`].
+    ///
+    /// [`MetadataBlockHeader`]: MetadataBlockHeader
+    fn new(is_last: bool, block_type: MetadataBlockType, block_size: u32) -> MetadataBlockHeader {
+        let last_bit = match is_last {
+            true => METADATA_HEADER_MASK_LAST,
+            false => 0,
+        };
+
+        let block_type_bits = match block_type {
+            MetadataBlockType::StreamInfo => 0,
+            MetadataBlockType::Padding => 1 << 24,
+            MetadataBlockType::Application => 2 << 24,
+            MetadataBlockType::SeekTable => 3 << 24,
+            MetadataBlockType::VorbisComment => 4 << 24,
+            MetadataBlockType::CueSheet => 5 << 24,
+            MetadataBlockType::Picture => 6 << 24,
+            MetadataBlockType::Reserved => 7 << 24,
+            MetadataBlockType::Forbidden => 127 << 24,
+        };
+
+        let size_bits = block_size | METADATA_HEADER_MASK_SIZE;
+
+        MetadataBlockHeader(last_bit | block_type_bits | size_bits)
+    }
+
     fn from_bytes(bytes: &[u8]) -> Option<(MetadataBlockHeader, &[u8])> {
         if bytes.len() < 4 {
             return None;
@@ -1034,6 +1191,10 @@ impl MetadataBlockHeader {
             MetadataBlockHeader(u32::from_be_bytes(*bytes[0..4].as_array()?)),
             &bytes[4..],
         ))
+    }
+
+    fn to_bytes(self) -> [u8; 4] {
+        self.0.to_be_bytes()
     }
 
     fn block_type(&self) -> MetadataBlockType {
@@ -1059,6 +1220,14 @@ impl MetadataBlockHeader {
         let MetadataBlockHeader(data) = self;
         let is_last = data & METADATA_HEADER_MASK_LAST;
         is_last != 0
+    }
+
+    /// Returns the given [`MetadataBlockHeader`] with its "is last" bit set.
+    ///
+    /// [`MetadataBlockHeader`]: MetadataBlockHeader
+    fn make_last(self) -> MetadataBlockHeader {
+        let MetadataBlockHeader(bits) = self;
+        MetadataBlockHeader(METADATA_HEADER_MASK_LAST | bits)
     }
 
     /// Size of the [`MetadataBlock`]'s data in bytes.
@@ -1097,6 +1266,10 @@ impl VorbisCommentBlock {
     }
 }
 
+/// [`Iterator`] over FLAC [`MetadataBlock`]s, as read from bytes.
+///
+/// [`Iterator`]: Iterator
+/// [`MetadataBlock`]: MetadataBlock
 struct BlocksIter<'b> {
     bytes: &'b [u8],
     finished: bool,
@@ -1267,6 +1440,97 @@ impl<'i> Iterator for BitBuffer<'i> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.take_bit()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct BitWriter {
+    current_bit: u8,
+    current_byte: u8,
+    bytes: Vec<u8>,
+}
+
+impl BitWriter {
+    fn new() -> BitWriter {
+        BitWriter {
+            current_bit: 0,
+            current_byte: 0,
+            bytes: Vec::new(),
+        }
+    }
+
+    fn push128(&mut self, bits: u128, n: u8) {
+        match n {
+            0 | 9.. => {}
+            _ => {
+                self.push_bit(bits as _);
+                self.push128(bits >> 1, n - 1);
+            }
+        }
+    }
+
+    fn push64(&mut self, bits: u64, n: u8) {
+        match n {
+            0 | 9.. => {}
+            _ => {
+                self.push_bit(bits as _);
+                self.push64(bits >> 1, n - 1);
+            }
+        }
+    }
+
+    fn push32(&mut self, bits: u32, n: u8) {
+        match n {
+            0 | 9.. => {}
+            _ => {
+                self.push_bit(bits as _);
+                self.push32(bits >> 1, n - 1);
+            }
+        }
+    }
+
+    fn push16(&mut self, bits: u16, n: u8) {
+        match n {
+            0 | 9.. => {}
+            _ => {
+                self.push_bit(bits as _);
+                self.push16(bits >> 1, n - 1);
+            }
+        }
+    }
+
+    fn push8(&mut self, bits: u8, n: u8) {
+        match n {
+            0 | 9.. => {}
+            _ => {
+                self.push_bit(bits);
+                self.push8(bits >> 1, n - 1);
+            }
+        }
+    }
+
+    fn push_bit(&mut self, bit: u8) {
+        self.current_byte = (self.current_byte << 1) | (bit & 1);
+        self.current_bit += 1;
+
+        if self.current_bit >= 8 {
+            self.bytes.push(self.current_byte);
+            // Dont need to set `self.current_byte` back to zero since all the current bits will
+            // just be shifted out as the next byte is pushed in. This will however need to be
+            // accounted for when flushing
+        }
+    }
+
+    fn flush(mut self) -> Vec<u8> {
+        match self.current_bit {
+            0 => {}
+            b => {
+                self.current_byte = self.current_byte << (8 - b);
+                self.bytes.push(self.current_byte);
+            }
+        };
+
+        self.bytes
     }
 }
 
