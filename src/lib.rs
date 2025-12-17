@@ -1,4 +1,3 @@
-#![feature(slice_as_array)]
 #![feature(ascii_char)]
 #![feature(ascii_char_variants)]
 #![feature(iter_map_windows)]
